@@ -20,6 +20,27 @@ This page groups major flags by subsystem for narrative browsing. **Precedence:*
 - `AGENT_TOOL_LAZY`
 - `AGENT_UI_VERBOSITY`
 
+## Provider price, speed and cache reuse
+
+`AGENT_PROVIDER_STRATEGY=adaptive` ranks standard OpenRouter endpoints using current
+input/output/cache-read prices, reported TPS and latency, and recent local agent
+measurements. Its value score is estimated request cost multiplied by estimated
+completion time; it prefers endpoints meeting the configured speed targets. Missing
+speed data is not treated as zero latency. If no measured candidates are available,
+normal OpenRouter price routing remains available.
+
+Endpoint metadata is warmed in the background and cached for five minutes. The selected
+exact endpoint remains warm for ten idle minutes, including across app restarts. Small
+price changes do not move a healthy conversation; meaningful speed degradation, an
+unavailable endpoint, an explicit policy change or expiry causes reconsideration.
+Allowlist, ignore, price-cap, context-size and tool-support constraints still apply.
+Flex and priority tiers are excluded from automatic standard-endpoint ranking.
+
+`AGENT_PROVIDER_STRATEGY=price` retains pure cheapest-first routing. Adaptive speed
+targets use `AGENT_PROVIDER_PREFERRED_MAX_LATENCY` (seconds) and
+`AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT` (tokens/sec). Real cache and latency results
+remain in `~/.liminal/cache_usage.jsonl`, including the selected endpoint when confirmed.
+
 ## Persona and bootstrap
 
 First-run and mid-session voice are controlled by the harness plus TUI/web clients.

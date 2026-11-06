@@ -9,6 +9,7 @@
 import { defineTool } from "../../shared/helpers.js";
 import { effectiveHarnessEnvRaw } from "@liminal/core";
 import {
+  checkBrowserSessionOwner,
   injectCaptchaToken,
   detectCaptchaInBrowserSession,
   type CaptchaType,
@@ -259,7 +260,7 @@ export const captchaSolveTool = defineTool({
     },
     additionalProperties: false,
   },
-  handler: async (args, emit) => {
+  handler: async (args, emit, harness) => {
     const key = captchaKey();
     if (!key) {
       return {
@@ -269,6 +270,7 @@ export const captchaSolveTool = defineTool({
     }
 
     const sessionId = (args["session_id"] as string | undefined)?.trim() || undefined;
+    if (sessionId && harness) { const error = checkBrowserSessionOwner(sessionId, harness.taskId); if (error) return {ok: false, error}; }
     const autoInject = args["auto_inject"] !== false;
     const svc: CaptchaService =
       (args["service"] as CaptchaService | undefined) ?? captchaService();

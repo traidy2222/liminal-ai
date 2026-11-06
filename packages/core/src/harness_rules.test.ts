@@ -14,15 +14,8 @@ test("buildHarnessRuleRecallMessageForIntent returns compact intent-scoped ids",
   assert.ok(!msg.includes("R-RESEARCH-SCOPE"));
 });
 
-test("buildHarnessRuleRecallMessageForIntent appends top violation hits", () => {
-  const hits = new Map<string, number>([
-    ["R-TOOL-RETRY", 9],
-    ["R-SCOPE-CREEP", 4],
-  ]);
-  const msg = buildHarnessRuleRecallMessageForIntent("knowledge", hits);
-  assert.match(msg, /R-MEMORY-CONTEXT/);
-  assert.match(msg, /R-TOOL-RETRY/);
-  for (const id of Object.keys(HARNESS_RULES)) {
-    if (msg.includes(`**${id}**`)) continue;
-  }
+test("legacy lookup includes its definitions and excludes unrelated violations",()=>{
+ const msg=buildHarnessRuleRecallMessageForIntent("conversational",new Map([["R-EMAIL-PRIVACY",99],["R-AGENTCARD",100]]));
+ assert.doesNotMatch(msg,/R-EMAIL|R-AGENTCARD|Full text for each ID/);
+ assert.match(msg,/OPTIONAL LEGACY RULE CATALOG/);
 });

@@ -4,6 +4,7 @@ import type { RuntimePersonaControls } from "@liminal/core";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import {personaStagingDirectory,checkPersonaCancellation,recoverPersonaPromotion} from './persona_transaction.js';
 import type { PersonaProfile } from "./persona_presets.js";
 
 const SOUL_SUBDIR = "soul";
@@ -33,6 +34,8 @@ const lastStreamWriteAt = new Map<PersonaArtifactId, number>();
  */
 function artifactPaths() {
   const paths = personaActivePaths();
+  recoverPersonaPromotion(paths.global);
+  recoverPersonaPromotion(paths.legacy);
   let dir: string;
   if (paths.legacyOnly) {
     dir = paths.legacy;
@@ -43,6 +46,7 @@ function artifactPaths() {
   } else {
     dir = paths.global;
   }
+  dir=personaStagingDirectory()??dir;
   const soulDir = join(dir, SOUL_SUBDIR);
   return {
     dir,
@@ -77,6 +81,7 @@ export async function writePersonaArtifact(
   content: string,
   opts?: { streaming?: boolean }
 ): Promise<void> {
+  checkPersonaCancellation();
   const paths = artifactPaths();
   await mkdir(paths.soulDir, { recursive: true });
   await unlink(paths.staleMonolithicSoulMd).catch(() => undefined);

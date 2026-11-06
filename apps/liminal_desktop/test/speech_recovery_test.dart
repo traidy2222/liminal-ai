@@ -11,6 +11,8 @@ class PlayerFixture implements AudioPlayer {
   bool nativePlaying = false;
   bool completePlayEarly = false;
   void Function()? onPlay;
+  AudioSource? source;
+  int loads = 0;
   final states = StreamController<ProcessingState>.broadcast();
   @override
   dynamic noSuchMethod(Invocation invocation) {
@@ -19,6 +21,14 @@ class PlayerFixture implements AudioPlayer {
       case #setUrl:
         if (state == ProcessingState.completed) state = ProcessingState.ready;
         return Future<Duration?>.value(const Duration(milliseconds: 100));
+      case #setAudioSource:
+        source = invocation.positionalArguments.first as AudioSource;
+        loads++;
+        if (state == ProcessingState.completed) state = ProcessingState.ready;
+        return Future<Duration?>.value(const Duration(milliseconds: 100));
+      case #currentIndexStream: return Stream<int?>.value(0);
+      case #durationStream: return Stream<Duration?>.value(const Duration(milliseconds: 100));
+      case #position: return Duration.zero;
       case #processingState: return state;
       case #processingStateStream: return states.stream;
       case #duration: return const Duration(milliseconds: 100);
@@ -33,6 +43,55 @@ class PlayerFixture implements AudioPlayer {
 }
 
 void main() {
+  testWidgets('interrupt discards a continuation waiting to join the playlist', (tester) async {
+    final player = PlayerFixture();
+    final output = SpeechOutput(player: player, gapless: true);
+    output.enqueue(SpeechQueueItem(clipId: 'a', text: 'First.', audioUrl: 'first.wav'));
+    await tester.pump();
+    final playlist = player.source as ConcatenatingAudioSource;
+    output.enqueue(SpeechQueueItem(clipId: 'b', text: 'Cancelled.', audioUrl: 'second.wav'));
+    output.interrupt();
+    await tester.pump();
+    expect(playlist.children.length, 1);
+    expect(output.queueLength, 0);
+    expect(output.isTtsPipelineActive, isFalse);
+    output.dispose(); await player.states.close();
+  });
+  testWidgets('continuation appends to the playing native playlist without stop or reload', (tester) async {
+    final player = PlayerFixture();
+    final output = SpeechOutput(player: player, gapless: true);
+    final holds = <bool>[];
+    output.onPlaybackHoldChange = holds.add;
+    output.enqueue(SpeechQueueItem(clipId: 'a', text: 'First sentence.', audioUrl: 'first.wav'));
+    await tester.pump();
+    output.enqueue(SpeechQueueItem(clipId: 'b', text: 'Next sentence.', audioUrl: 'second.wav'));
+    await tester.pump();
+    expect((player.source as ConcatenatingAudioSource).children.length, 2);
+    expect(player.loads, 1);
+    expect(player.stops, 0);
+    expect(holds, [true]);
+    player.state = ProcessingState.completed;
+    player.states.add(ProcessingState.completed);
+    player.playback.complete();
+    await tester.pump();
+    expect(player.stops, 1);
+    expect(output.isTtsPipelineActive, isFalse);
+    expect(holds, [true, false]);
+    await tester.pump(const Duration(seconds: 2));
+    output.dispose(); await player.states.close();
+  });
+  testWidgets('interrupt cancels server synthesis as well as local playback', (tester) async {
+    final player = PlayerFixture();
+    final output = SpeechOutput(player: player);
+    var cancelled = 0;
+    output.onInterrupted = () { cancelled++; };
+    output.interrupt();
+    expect(cancelled, 1);
+    expect(output.queueLength, 0);
+    expect(output.isTtsPipelineActive, isFalse);
+    output.dispose();
+    await player.states.close();
+  });
   for (final failure in ['missing-completion', 'never-ready', 'stalled-download']) {
     testWidgets('TTS $failure cannot suspend dictation forever', (tester) async {
       final player = PlayerFixture();

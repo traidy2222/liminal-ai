@@ -3,23 +3,11 @@ import { defineTool } from "../../shared/helpers.js";
 export const thinkTool = defineTool({
   name: "think",
   description:
-    "WHAT: Deep planning and orientation — use before major work or after unexpected results to re-orient. " +
-    "This is the planning channel, not the inference channel. For quick between-step logical inference ('given this result, therefore X'), use reason() instead.\n" +
-    "WHEN: (1) Before non-trivial work when scope/families/approach are unclear — fill structured fields (harness pre-activates families). " +
-    "Depth follows [REASONING BUDGET] think= field: brief = scope + families + ≤3 bullets (no pseudocode); standard/deep when budget allows. " +
-    "If toolFirst=yes, keep think() short then call tools immediately. " +
-    "(2) After a surprising/blocking result that requires re-orienting the whole approach — use think() to replan. " +
-    "(3) Post-completion: set self_check (0-100) to record quality assessment.\n" +
-    "NOT WHEN: Trivial single-step asks, or when [REASONING BUDGET] says think=skip, or when you just need to interpret a tool result and pick a next step — use reason() for that.\n" +
-    "HARNESS EFFECT: tool_families[] → pre-activated automatically (no activate_tool_family calls needed). " +
-    "clarification_needed=true → pauses execution and surfaces question to user. " +
-    "scope declared → arms compensation ledger on mutating/destructive work.\n" +
-    "ARGS: content (required — planning text); " +
-    "tool_families[] (families: shell/git/code_intel/web/…; integrations: google_workspace, microsoft_365, github, ida, slack, linear, notion, xero, or connectors for connect_provider only); " +
-    "scope (read_only|additive|mutating|destructive); " +
-    "unknowns[] (gaps to resolve before acting); " +
-    "clarification_needed + clarification_question; " +
-    "self_check (0-100, post-task quality score).",
+    "Optional planning for substantial work or replanning after a surprise; skip for simple tasks. " +
+    "Follow the current reasoning budget. Declared tool_families are activated automatically. " +
+    "scope configures rollback tracking for mutating/destructive work. " +
+    "clarification_needed pauses for the supplied question; use only for genuinely missing information. " +
+    "self_check optionally records a post-task score.",
   requiresApproval: false,
   parameters: {
     type: "object",
@@ -32,11 +20,8 @@ export const thinkTool = defineTool({
         type: "array",
         items: { type: "string" },
         description:
-          "Tool families needed for this task. Declaring them here pre-activates them — " +
-          "no separate activate_tool_family calls needed. Valid: shell, git, code_intel, web, " +
-      "reasoning, context, memory_advanced, vault, files_edit, tasks, vision, browser, document, markets, " +
-      "harness_ui, orchestration, navigation, archives, meta, dynamic_tools, captcha, agenda_scheduler. " +
-      "For external MCP connectors, prefer mcp_search_tools with a focused task query over activating a broad connector family; broad families load many schemas.",
+          "Families to activate for this task; discover valid IDs with list_tool_families. " +
+          "For external MCP tools, prefer focused mcp_search_tools discovery over loading broad catalogs.",
       },
       scope: {
         type: "string",

@@ -190,6 +190,16 @@ export interface ApplyPendingTurnLearningOpts {
   processOnly?: boolean;
 }
 
+/** Sample semantic reviews where they can add evidence beyond cheap local feedback. */
+export function shouldJudgeTurnOutcome(pending: PendingTurnLearningRecord, feedback: ImplicitFollowUpKind): boolean {
+  if (feedback === "correction" || feedback === "retry") return true;
+  if (pending.toolOutcomes.some(tool => !tool.ok)) return true;
+  const housekeeping = /^(?:think|plan|remember|recall(?:_.*)?|search_memory|memory_.*|check_context|list_tool_families|activate_tool_family)$/;
+  const work = new Set(pending.toolsUsed.filter(name => !housekeeping.test(name)));
+  return work.size >= 2 || pending.recipeEligible ||
+    (pending.intentClass !== "conversational" && pending.userGoal.length >= 240 && pending.assistantPreview.length >= 300);
+}
+
 /**
  * Resolve a queued turn with the user's follow-up (or process-only flush) and
  * write effort / rule / recipe learning records.
@@ -202,6 +212,7 @@ export async function applyPendingTurnLearning(opts: ApplyPendingTurnLearningOpt
   let judgeScore: number | null = null;
   if (
     !opts.processOnly &&
+    shouldJudgeTurnOutcome(opts.pending, feedback.kind) &&
     outcomeJudgeEnabled() &&
     opts.client &&
     Math.random() < outcomeJudgeSampleRate()

@@ -5,10 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:path/path.dart' as p;
-import 'package:webview_win_floating/webview_win_floating.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app/liminal_app.dart';
+import 'browser/browser_workspace.dart';
 import 'apps/app_window_manager.dart';
 import 'apps/app_window_root.dart';
 import 'core/crash_reporter.dart';
@@ -35,6 +35,7 @@ Future<void> main(List<String> args) async {
   await windowManager.ensureInitialized();
   final windowPositionManager = WindowPositionManager();
   await windowPositionManager.initialize();
+  await BrowserWorkspace.instance.initialize();
 
   final repoRoot = detectRepoRoot();
   final controller = AppController(repoRoot: repoRoot);

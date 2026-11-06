@@ -90,6 +90,7 @@ export interface WireAppConfig {
   dictationSilenceMsShort?: number;
   dictationSilenceMsLong?: number;
   dictationMaxRecordingMs?: number;
+  wakeVoice?: { enabled: boolean; phrase: string; idleTimeoutMs: number };
 }
 
 /** One inbox poll cycle entry for activity log UI. */

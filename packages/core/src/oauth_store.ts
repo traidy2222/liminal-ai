@@ -153,6 +153,14 @@ function encrypt(plain: string): string {
   return encryptWithKey(plain, primaryEncryptionKey());
 }
 
+/** Shared authenticated local encryption for non-OAuth secrets, using the same stable device key. */
+export function protectLocalSecret(plain: string): string { return encrypt(plain); }
+export function unprotectLocalSecret(payload: string): string {
+  const decoded = decryptPayload(payload);
+  if (!decoded) throw new Error("Local secret could not be decrypted with this installation's key");
+  return decoded.json;
+}
+
 async function maybeMigrateEncryptedFile(
   provider: string,
   accountId: string,

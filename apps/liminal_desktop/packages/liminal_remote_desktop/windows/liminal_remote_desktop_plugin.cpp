@@ -229,6 +229,31 @@ class LiminalRemoteDesktopPlugin : public flutter::Plugin {
     const auto& name = method_call.method_name();
     const auto* args = std::get_if<flutter::EncodableMap>(method_call.arguments());
 
+    // App-owned WebView2 profile/control endpoint. Kept in the shipped native
+    // plugin so regenerating Flutter's runner cannot discard this integration.
+    if (name == "configureBrowser") {
+      if (!args) { result->Error("arguments", "Browser configuration required"); return; }
+      auto port_it = args->find(flutter::EncodableValue("port"));
+      auto folder_it = args->find(flutter::EncodableValue("folder"));
+      if (port_it == args->end() || !std::holds_alternative<int32_t>(port_it->second) ||
+          folder_it == args->end() || !std::holds_alternative<std::string>(folder_it->second)) {
+        result->Error("arguments", "Browser port and profile folder required"); return;
+      }
+      const int port = std::get<int32_t>(port_it->second);
+      const auto folder = std::get<std::string>(folder_it->second);
+      if (port < 1024 || port > 65535 || folder.empty()) { result->Error("arguments", "Invalid browser configuration"); return; }
+      const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, folder.c_str(), -1, nullptr, 0);
+      if (length <= 1) { result->Error("folder", "Invalid browser profile folder"); return; }
+      std::wstring wide_folder(length, L'\0');
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, folder.c_str(), -1, wide_folder.data(), length);
+      const auto flags = L"--remote-debugging-address=127.0.0.1 --remote-debugging-port=" + std::to_wstring(port);
+      if (!SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", wide_folder.c_str()) ||
+          !SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags.c_str())) {
+        result->Error("configure", "Could not initialize browser control"); return;
+      }
+      result->Success(); return;
+    }
+
     if (name == "registerWindow") {
       std::string id;
       bool is_main = false;

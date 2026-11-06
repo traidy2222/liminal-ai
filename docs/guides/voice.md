@@ -3,7 +3,74 @@
 The web UI can **speak its replies** (text-to-speech) and **listen** (dictation/transcription),
 so you can drive the agent hands-free. Local transcription and speech settings are shared by desktop and web.
 
+## Desktop wake listening
+
+In **Settings → Preferences**, enable **Always-on wake word**. The desktop app listens
+while open, including when minimized. The default phrase is **Hey Jarvis**; change it
+to a distinctive phrase in **Wake phrase**. Install local Whisper first using the
+commands below. Wake listening uses this fast local decoder independently of your
+manual dictation accuracy setting.
+
+Say **“Hey Jarvis, start a mission to…”**, or say the phrase, pause, and give your
+request next. Mission Control handles the conversation and delegates mission work
+to worker chats. You can ask for status and keep talking while those workers run.
+Completion updates wait for an ongoing conversational turn and are spoken when the
+voice session is still awake and spoken responses are enabled.
+
+Follow-up requests need no wake phrase until the conversation times out. The default
+idle timeout is **45 seconds**, configurable from **10 to 300 seconds**. Replies,
+playback and speech capture do not consume this window. Say **“go to sleep”** or
+**“stop listening”** to return to wake-only listening; this does not cancel a mission
+already running. Requests not yet sent are cleared on explicit sleep or pause.
+
+The app-wide listener strip shows the current state, queued requests, mission status,
+and **Pause listening**, **Resume listening**, **Go to sleep** and voice settings.
+For audible replies, enable **Spoken responses** and select a speech model; the
+installed **JARVIS Warm — local** voice works with single-model chat mode.
+
+Background speech stays in memory and is never uploaded to a model provider or saved
+as an attachment. Exact phrase matching ignores punctuation and case, but does not
+fuzzily match other names or phrases mentioned later in ordinary conversation.
+The microphone pauses during reply playback to prevent speaker feedback; use
+**Interrupt** to stop playback and resume listening. Normal composer dictation
+temporarily takes over the microphone. Closing Liminal stops listening; this feature
+does not install an operating-system background service.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `AGENT_WAKE_WORD_ENABLED` | `0` | Opt in to desktop wake listening |
+| `AGENT_WAKE_WORD_PHRASE` | `Hey Jarvis` | Phrase at the beginning of an utterance |
+| `AGENT_WAKE_WORD_IDLE_SECONDS` | `45` | Follow-up window after the most recent conversation activity |
+
+Whisper warms at launch. With wake listening and an explicitly enabled local voice,
+the voice also preloads on CPU in the background when memory allows, without downloading models or
+calling a provider. First startup still includes loading time. Compatible models
+park on CPU between audio tasks so their workers and loaded assets can be reused;
+GPU handoffs are serialized and failed releases fall back to closing the owned worker.
+
 ## Dictation (speech → text)
+
+Voice replies stream sentence by sentence as the agent writes. The first sentence
+can play while later text and audio are still being generated; the agent does not
+wait for an extra `speak()` tool round trip or for every clip to finish synthesis.
+Natural phrase boundaries keep words together. Code fences and reasoning stay out
+of speech. On supported NVIDIA GPUs the local voice decoder uses BF16 autocast;
+the approved warm tone processing and original pitch are preserved.
+The opening phrase is sent promptly; following sentences are grouped into a
+cohesive continuation. Desktop preloads the next clip into the active native
+playlist rather than stopping, reopening the player and releasing the microphone
+between sentences. A short acknowledgement is kept with its following sentence
+when the answer is still being written.
+Voice turns also skip the optional remote intent-classifier round trip; the main
+model keeps its tools and decides whether to answer directly or delegate work.
+
+**Interrupt** cancels both playback and pending speech generation, without stopping
+background worker tasks. Late chunks from an interrupted voice reply are ignored.
+An active short local phrase may finish internally and be discarded; the voice
+stays loaded so an interruption does not impose another cold model load.
+The chat becomes available when the agent finishes its work, independently of audio
+generation. Cold model loading still takes time; launch-time preload runs in the
+background when enough memory is available.
 
 Record in the browser and send the clip for transcription:
 
@@ -129,8 +196,10 @@ cloud speech and other specialist-model restrictions remain in force.
 Arm the mic session for the existing spoken-response flow, or use `POST /api/tts` for playback.
 
 Models live in `~/.liminal/voices/jarvis-warm-v1`, separate from application updates.
-The worker remains warm between requests, releases its resources after two minutes idle,
-and is stopped on cancellation. First playback includes model loading; CPU inference can be slow.
+The worker remains warm between requests and normally releases its resources after two
+minutes idle. Wake mode keeps an explicitly enabled local voice ready while the app is
+open, parking its weights on CPU between audio tasks. Cancellation still stops the worker.
+First playback includes model loading; CPU inference can be slow.
 CUDA is used when installed and sufficient GPU memory is available; otherwise synthesis uses CPU.
 The response is a normal WAV clip playable by both clients. Speech clips are cached per voice/model,
 so switching from a cloud voice cannot replay stale audio in the previous voice.
@@ -160,7 +229,8 @@ Dictation flow:
 1. Arm the **mic** in the composer (session stays on across turns).
 2. VAD detects end-of-speech → clip uploads → server ASR (`AGENT_TRANSCRIBE_MODEL`).
 3. Message sends with `liveDictation: true` over the WebSocket protocol.
-4. Harness `speak()` events play through `just_audio` when `AGENT_TTS_ENABLED=1`.
+4. Complete phrases synthesize alongside text generation; `speech` events play through
+   `just_audio` when spoken responses are enabled.
 
 Desktop uses **server-side transcription only** (no Web Speech). Timing knobs
 (`AGENT_DICTATION_*_MS`) are exposed on `WireAppConfig` / Settings like web.

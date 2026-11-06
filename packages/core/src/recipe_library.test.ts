@@ -39,13 +39,31 @@ test("formatRecipePrimeMessage is a one-line positive hint", () => {
     bestExample: {
       toolSequence: "grep_file → grep_file → edit_file",
       outcome: 0.75,
-      at: "2026-01-01T00:00:00.000Z",
+      goal: "Fix a TypeScript symbol",
     },
     firstAt: "2026-01-01T00:00:00.000Z",
     lastAt: "2026-01-02T00:00:00.000Z",
   };
   const msg = formatRecipePrimeMessage(entry);
-  assert.match(msg, /^\[RECIPE PRIME\] Similar past turns succeeded with:/);
+  assert.match(msg, /^\[RECIPE EVIDENCE\] Past tool execution:/);
   assert.match(msg, /grep_file ×2 → edit_file/);
   assert.match(msg, /reused ×4/);
+});
+
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {formatRecipeLibraryHints,findBestRecipeForPrime} from "./recipe_library.js";
+import {recipeStatsPaths} from "./global_storage.js";
+test("irrelevant and cross-intent recipes never become plans",async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),"recipe-relevance-"));const prior=process.env.AGENT_GLOBAL_STORAGE_ROOT;
+ process.env.AGENT_GLOBAL_STORAGE_ROOT=root;
+ try{
+ const recipe={key:"coding::LOCATE",intentClass:"coding",phaseShape:["LOCATE"],count:100,outcomeSum:100,outcomeCount:100,toolUnion:["read_file"],bestExample:{goal:"Repair TypeScript authentication parser",toolSequence:"read_file → edit_file",outcome:1},firstAt:"now",lastAt:"now"};
+ await fs.writeFile(recipeStatsPaths().global,JSON.stringify({recipes:{fixture:recipe}}));
+ assert.equal(await formatRecipeLibraryHints("Find the weather in Brisbane","knowledge"),null);
+ assert.equal(await formatRecipeLibraryHints("Find the weather in Brisbane","coding"),null);
+ assert.equal(await findBestRecipeForPrime("knowledge"),null);
+ const hint=await formatRecipeLibraryHints("Repair TypeScript authentication parser","coding");assert.ok(hint);assert.match(hint,/process|Process/);assert.doesNotMatch(hint,/DEFAULT PLAN|plan skeleton|established play/);
+ }finally{if(prior===undefined)delete process.env.AGENT_GLOBAL_STORAGE_ROOT;else process.env.AGENT_GLOBAL_STORAGE_ROOT=prior;await fs.rm(root,{recursive:true,force:true});}
 });

@@ -1,12 +1,15 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  providerConnectionConfigured,validateProviderSetup,persistValidatedProvider,
   buildHarnessSettingsApiFields,
   HARNESS_SETTINGS_TABS,
   HARNESS_MANAGED_ENV_KEY_SET,
   harnessEnvResolutionMeta,
   resolveHarnessEnvRaw,
   resolveSpeechSynthesisConfig,
+  resolveWakeVoiceConfig,
+  type WakeVoiceConfig,
   ensureProviderApiKeysInProcess,
   hasLocalProviderApiKey,
   isProviderApiKeyConfigured,
@@ -55,6 +58,7 @@ export interface DesktopConfigSnapshot {
   dictationSilenceMsShort: number;
   dictationSilenceMsLong: number;
   dictationMaxRecordingMs: number;
+  wakeVoice: WakeVoiceConfig;
 }
 
 function parseHarnessMs(prefs: RuntimePreferences | null, key: string, fallback: number): number {
@@ -79,7 +83,8 @@ export function wireAppConfig(snapshot: DesktopConfigSnapshot): WireAppConfig {
 
 export async function buildDesktopConfig(
   bridge: SessionBridge,
-  repoRoot: string
+  repoRoot: string,
+  options?: { wakePreferences: RuntimePreferences | null }
 ): Promise<DesktopConfigSnapshot> {
   const prefs = bridge.harness.getRuntimePreferences();
   const cfg = bridge.harness.config;
@@ -102,8 +107,7 @@ export async function buildDesktopConfig(
   }
   ensureProviderApiKeysInProcess();
   const apiKeyConfigured =
-    !!(cfg.openRouterApiKey?.trim()) ||
-    isProviderApiKeyConfigured({ baseURL: cfg.baseURL });
+    providerConnectionConfigured(cfg.openRouterApiKey);
   return {
     apiKeyConfigured,
     personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -126,6 +130,10 @@ export async function buildDesktopConfig(
     dictationSilenceMsShort: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_SHORT", 1500),
     dictationSilenceMsLong: parseHarnessMs(prefs, "AGENT_DICTATION_SILENCE_MS_LONG", 2500),
     dictationMaxRecordingMs: parseHarnessMs(prefs, "AGENT_DICTATION_MAX_RECORDING_MS", 60000),
+    // Always-on listening belongs to the desktop, including while Home or
+    // another chat is visible. A chat's older preference snapshot cannot turn
+    // off the application's listener simply by becoming the active chat.
+    wakeVoice: resolveWakeVoiceConfig(options ? options.wakePreferences : prefs),
   };
 }
 
@@ -148,8 +156,7 @@ export function buildSettingsSnapshot(
 
   ensureProviderApiKeysInProcess();
   const apiKeyConfigured =
-    !!(harnessCfg?.openRouterApiKey?.trim()) ||
-    isProviderApiKeyConfigured({ baseURL: baseURL || undefined });
+    providerConnectionConfigured(harnessCfg?.openRouterApiKey);
 
   const managedRoute = baseURL.includes("/inference");
   return {
@@ -181,114 +188,10 @@ export async function saveProviderCredentials(
   repoRoot: string,
   input: { apiKey?: string; model?: string; baseURL?: string }
 ): Promise<void> {
-  const key = (input.apiKey ?? "").trim();
-  const model = input.model?.trim();
-  const baseURL = input.baseURL?.trim();
-
-  if (key.length > 0 && key.length < 8) {
-    throw new Error("API key is too short.");
-  }
-
-  const effectiveBase =
-    baseURL?.trim() ||
-    process.env["AGENT_API_BASE_URL"]?.trim() ||
-    "";
-  const keyEnvVar = /^castai_v1_/i.test(key)
-    ? "KIMCHI_API_KEY"
-    : apiKeyEnvVarForBaseUrl(effectiveBase);
-
-  const updates: Record<string, string> = {};
-  if (key.length >= 8) updates[keyEnvVar] = key;
-  const prefsPatch: Partial<RuntimePreferences> = {};
-  if (model || baseURL) {
-    prefsPatch.provider = {
-      ...(model ? { model: model.slice(0, 200) } : {}),
-      ...(baseURL ? { baseURL: baseURL.slice(0, 500) } : {}),
-    };
-  }
-
-  const activePrefs = registry.getActiveBridge()?.harness.getRuntimePreferences() ?? null;
-  const prefsBase =
-    activePrefs ?? (await loadRuntimePreferences(repoRoot).catch(() => null));
-  const modelForRouting =
-    model?.trim() ||
-    prefsPatch.provider?.model?.trim() ||
-    prefsBase?.provider?.model?.trim() ||
-    prefsBase?.harness?.env?.AGENT_MODEL?.trim() ||
-    "";
-  if (modelForRouting) {
-    const byokPatch = buildByokRoutingPatchForModel(modelForRouting, prefsBase);
-    if (byokPatch) {
-      Object.assign(prefsPatch, {
-        provider: { ...prefsPatch.provider, ...byokPatch.provider },
-        harness: {
-          env: {
-            ...(prefsPatch.harness?.env ?? {}),
-            ...(byokPatch.harness?.env ?? {}),
-          },
-        },
-      });
-    } else if (!baseURL && model) {
-      prefsPatch.harness = {
-        env: {
-          ...(prefsPatch.harness?.env ?? {}),
-          AGENT_MODEL: model.slice(0, 200),
-        },
-      };
-    }
-  }
-
-  // Saving a BYOK API key (or using one already in .env) → direct OpenRouter, not Vireon proxy.
-  const hasKey = key.length >= 8 || hasLocalProviderApiKey();
-  if (hasKey) {
-    prefsPatch.provider = {
-      ...prefsPatch.provider,
-      inferenceMode: "byok",
-      baseURL: effectiveBase || DEFAULT_AGENT_API_BASE_URL,
-      ...(model ? { model: model.slice(0, 200) } : {}),
-    };
-    prefsPatch.harness = {
-      env: {
-        ...(prefsPatch.harness?.env ?? {}),
-        AGENT_INFERENCE_MODE: "byok",
-        AGENT_INFERENCE_PREFER_MANAGED: "0",
-        AGENT_API_BASE_URL: effectiveBase || DEFAULT_AGENT_API_BASE_URL,
-        ...(model ? { AGENT_MODEL: model.slice(0, 200) } : {}),
-      },
-    };
-  }
-
-  if (Object.keys(updates).length === 0 && !prefsPatch.provider && !prefsPatch.harness) {
-    throw new Error("Nothing to save — enter a new API key or change model/base URL.");
-  }
-
-  if (Object.keys(updates).length > 0) {
-    if (!existsSync(join(repoRoot, "packages", "sidecar"))) {
-      throw new Error(`Invalid repo root: ${repoRoot}`);
-    }
-    writeEnvMerge(repoRoot, updates);
-    const savedKey = updates[keyEnvVar];
-    if (savedKey) {
-      applyApiKeyToProcess(savedKey, keyEnvVar);
-      if (keyEnvVar === "OPENROUTER_API_KEY") {
-        applyApiKeyToProcess(savedKey, "AGENT_API_KEY");
-      } else if (keyEnvVar === "KIMCHI_API_KEY" || keyEnvVar === "CASTAI_API_KEY") {
-        delete process.env["AGENT_API_KEY"];
-      }
-    }
-  }
-
-  if (baseURL) {
-    syncProviderProcessEnvForBase(baseURL);
-  }
-
-  ensureProviderApiKeysInProcess();
-
-  if (prefsPatch.provider || prefsPatch.harness) {
-    await registry.applyRuntimePreferencesPatch(prefsPatch, repoRoot);
-  } else {
-    await registry.reloadRuntimePrefs();
-  }
+  if(registry.anyHarnessBusy())throw new Error('Finish the current turn before changing providers.');
+  const validated=await validateProviderSetup(input);
+  const patch=await persistValidatedProvider(validated);
+  await registry.applyRuntimePreferencesPatch(patch,repoRoot);
   await registry.reapplyAllProviders();
 }
 

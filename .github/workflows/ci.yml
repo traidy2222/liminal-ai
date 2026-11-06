@@ -59,6 +59,11 @@ jobs:
       - name: Test terminal voice status over WebSocket and SSE
         run: node --import tsx --test packages/sidecar/src/voice_idle_heartbeat.test.ts packages/sidecar/src/voice_preflight_review.test.ts packages/web/server/voice_idle_heartbeat.test.ts
 
+      - name: Test wake voice, local audio handoffs and responsive Mission Control
+        run: |
+          node --import tsx --test packages/core/src/wake_voice.test.ts packages/core/src/local_audio_parking.test.ts packages/tools/src/families/audio/wake_audio.test.ts packages/sidecar/src/wake_orchestrator.test.ts
+          python -B packages/core/local-voice/test_parking.py
+
       - name: Test original-pitch warm tone (no speech model required)
         run: |
           python -m pip install numpy==1.26.4 scipy==1.17.1 pyloudnorm==0.2.0
@@ -71,6 +76,21 @@ jobs:
 
       - name: Test OAuth connection recovery
         run: npm run test:oauth
+
+      - name: Install Chromium for local browser fixtures
+        run: npm exec --workspace=@liminal/tools -- playwright install --with-deps chromium
+
+      - name: Test browser, setup and conversation updates (offline fixtures)
+        env:
+          AGENT_BROWSER_INTEGRATION: "1"
+        run: |
+          node --import tsx --test --test-concurrency=4 packages/tools/src/families/browser/browser_context.test.ts packages/tools/src/families/browser/browser_findings.test.ts packages/tools/src/families/browser/browser_idle.test.ts packages/tools/src/families/browser/browser_readable.test.ts packages/tools/src/families/browser/browser_research.test.ts packages/tools/src/families/browser/browser_signup.test.ts packages/tools/src/families/browser/browser_workspace.test.ts packages/tools/src/families/files/file_version.test.ts packages/tools/src/families/harness_ui/persona_transaction.test.ts packages/sidecar/src/browser_workspace_handler.test.ts packages/sidecar/src/chat_ordering_regression.test.ts packages/sidecar/src/wake_config_scope.test.ts packages/web/server/chat_ordering.test.ts
+
+      - name: Test verified procedures and bounded experiment controls
+        run: |
+          node --import tsx --test packages/tools/src/families/memory/procedure_memory.test.ts packages/eval/src/procedural/learning_gate.test.ts
+          node --test scripts/experiment-procedural-memory-live.test.mjs scripts/procedure-oracle.test.mjs
+          node scripts/verify-procedure-native-runtime.mjs
 
       - name: Test MCP Gmail contracts
         run: node --import tsx --test packages/tools/src/integrations/external_api/gmail_mcp_contract.test.ts packages/tools/src/integrations/external_api/mcp_tool_classify.test.ts packages/tools/src/integrations/external_api/mcp_description_write_regression.test.ts packages/tools/src/integrations/external_api/mcp_compound_action_regression.test.ts packages/tools/src/integrations/google/gmail_compose_guard.test.ts
@@ -207,6 +227,10 @@ jobs:
         run: npm run verify:workflows
       - name: Test Windows update helper and rollback
         run: npm run test:update-release
+      - name: Test procedure persistence and Windows worker launch
+        run: |
+          npm run test:procedures -w @liminal/core
+          node --import tsx --test packages/core/src/python_worker_process.test.ts packages/sidecar/src/wake_config_scope.test.ts
       - name: Verify terminal replay, output, and cleanup
         timeout-minutes: 3
         run: node --import tsx --test packages/sidecar/src/pty_manager.test.ts packages/sidecar/src/desktop_parent_regression.test.ts packages/sidecar/src/foreground_shell_regression.test.ts packages/sidecar/src/powershell_module_path_regression.test.ts packages/sidecar/src/foreground_cancellation_regression.test.ts packages/tools/src/families/shell/foreground_output_retention.test.ts

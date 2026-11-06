@@ -8,7 +8,7 @@ const snapshot: ContextSnapshot={tokenCount:10,maxTokens:1000,usageFraction:.01,
 test("post-turn trace cannot reopen busy while send cleanup is unwinding", t=>{
   const emitter=new AgentEmitter(), frames:ServerFrame[]=[];
 
-  const harness={emitter,getIsRunning:()=>true,getToolExecutionScope:()=>"voice-heartbeat-test"} as unknown as AgentHarness;
+  const harness={emitter,getIsRunning:()=>true,getToolExecutionScope:()=>"voice-heartbeat-test",closeProcedureRuntime:()=>{}} as unknown as AgentHarness;
   const bridge=new SessionBridge(harness,"voice-test",process.cwd(),f=>frames.push(f));
   t.after(()=>bridge.dispose());
   emitter.emit("send_start",{userMessage:"hello",agentDepth:0});
@@ -23,7 +23,7 @@ test("post-turn trace cannot reopen busy while send cleanup is unwinding", t=>{
 
 test("the next actual send re-arms busy without inheriting a retired heartbeat", t=>{
   const emitter=new AgentEmitter(), frames:ServerFrame[]=[];
-  const harness={emitter,getIsRunning:()=>true,getToolExecutionScope:()=>"voice-next-test"} as unknown as AgentHarness;
+  const harness={emitter,getIsRunning:()=>true,getToolExecutionScope:()=>"voice-next-test",closeProcedureRuntime:()=>{}} as unknown as AgentHarness;
   const bridge=new SessionBridge(harness,"voice-next",process.cwd(),f=>frames.push(f));
   t.after(()=>bridge.dispose());
   for(let turn=0;turn<3;turn++){

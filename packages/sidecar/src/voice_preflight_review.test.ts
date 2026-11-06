@@ -12,6 +12,7 @@ for (const fails of [false, true]) {
     let reject!: (err: Error) => void;
     const preflight = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
     const harness = {
+      closeProcedureRuntime: () => {},
       emitter,
       getIsRunning: () => false,
       getToolExecutionScope: () => "voice-preflight-review",

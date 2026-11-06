@@ -22,6 +22,7 @@ import '../../models/settings_presentation.dart';
 import '../widgets/liminal_shell.dart';
 import '../widgets/managed_inference_panel.dart';
 import '../widgets/about_updates_panel.dart';
+import '../widgets/cache_usage_panel.dart';
 
 /// Harness fields surfaced on Integrations instead of Settings.
 const _integrationsHarnessSubgroups = {'inbox_watch'};
@@ -38,7 +39,8 @@ List<HarnessSettingsField> _settingsVisibleHarnessFields(
 }
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.initialSection = 'models_api'});
+  final String initialSection;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -60,6 +62,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    if (settingsDestinations.any((item) => item.id == widget.initialSection)) {
+      _selected = widget.initialSection;
+    }
     _search.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final cfg = AppScope.of(context).config;
@@ -345,7 +350,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final searchActive = query.isNotEmpty;
     final singleField = snap?.fields.where((f) => f.key == 'AGENT_SINGLE_MODEL').firstOrNull;
     final singleModel = const {'1', 'true', 'on', 'yes'}.contains(singleField?.value);
-    final allFields = _settingsVisibleHarnessFields(snap?.fields ?? const []).where((f) => !(singleModel && f.key != 'AGENT_MODEL' && f.key.endsWith('_MODEL'))).toList();
+    final allFields = _settingsVisibleHarnessFields(snap?.fields ?? const []).where((f) => !(singleModel && !const {'AGENT_MODEL', 'AGENT_TTS_MODEL', 'AGENT_TRANSCRIBE_MODEL'}.contains(f.key) && f.key.endsWith('_MODEL'))).toList();
     final categoryFields = allFields
         .where((f) => settingsCategory(f.tabId, f.key) == _selected)
         .toList();
@@ -523,6 +528,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (_selected == 'account') account,
             if (_selected == 'about') about,
             if (_selected == 'models_api') provider,
+            if (_selected == 'models_api') const CacheUsagePanel(),
             if (_selected != 'account' &&
                 _selected != 'about' &&
                 _selected != 'models_api') ...[

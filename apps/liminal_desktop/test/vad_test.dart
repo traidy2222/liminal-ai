@@ -1,7 +1,21 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liminal_desktop/audio/vad.dart';
+import 'dart:typed_data';
 
 void main() {
+  test(
+    'PCM level follows captured samples even if the platform meter is stale',
+    () {
+      expect(AmplitudeVad.pcmDb(Uint8List(640)), -90);
+      final pcm = Uint8List(640);
+      final data = ByteData.sublistView(pcm);
+      for (var i = 0; i < 320; i++) {
+        data.setInt16(i * 2, i.isEven ? 16384 : -16384, Endian.little);
+      }
+      expect(AmplitudeVad.pcmDb(pcm), closeTo(-6.02, .02));
+      expect(AmplitudeVad.pcmDb(Uint8List(1)), -90);
+    },
+  );
   test('AmplitudeVad fires speech start after calibration', () {
     var started = false;
     var now = 1000;

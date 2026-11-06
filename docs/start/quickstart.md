@@ -6,7 +6,20 @@ Get Liminal running locally in a few minutes.
 
 - Node.js 22+
 - npm 10+
-- An OpenAI-compatible API key (OpenRouter, OpenAI, etc.)
+- A cloud provider API key, or a running local OpenAI-compatible model server
+
+## Desktop and web first run
+
+Choose **Cloud** for OpenRouter, or **Local** for LM Studio/Ollama. Load available
+models, search for a tool-capable model and select it. Local servers do not need
+a cloud API key. **Verify and continue** runs one small tool-call check before
+saving; rejected keys, missing models and unreachable servers stay on setup.
+Cloud verification uses your provider credits.
+
+Next, generate a writing personality or use the built-in personality. Generation
+shows progress and previews; cancellation or failure preserves the active persona
+and allows retry. Spoken replies are a separate, optional choice. Microphone and
+wake-word settings can be configured later.
 
 ## One-command install (new users)
 

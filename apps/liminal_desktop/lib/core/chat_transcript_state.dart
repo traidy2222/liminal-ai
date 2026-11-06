@@ -1,3 +1,4 @@
+import '../models/procedure_activity.dart';
 import '../models/browser_view_state.dart';
 import '../models/context_snapshot.dart';
 import '../models/file_edit_view_state.dart';
@@ -7,6 +8,7 @@ import '../state/message_models.dart';
 class ChatTranscriptState {
   const ChatTranscriptState({
     this.messages = const [],
+    this.procedureActivities = const [],
     this.busy = false,
     this.pendingApprovals = const [],
     this.pendingAskUser,
@@ -19,6 +21,7 @@ class ChatTranscriptState {
   });
 
   final List<MessageEntry> messages;
+  final List<ProcedureActivity> procedureActivities;
   final bool busy;
   /// FIFO queue — parallel tool batches can emit multiple `tool_approval` events.
   final List<PendingApproval> pendingApprovals;
@@ -37,6 +40,7 @@ class ChatTranscriptState {
 
   ChatTranscriptState copyWith({
     List<MessageEntry>? messages,
+    List<ProcedureActivity>? procedureActivities,
     bool? busy,
     List<PendingApproval>? pendingApprovals,
     bool clearPendingApprovals = false,
@@ -55,6 +59,7 @@ class ChatTranscriptState {
   }) {
     return ChatTranscriptState(
       messages: messages ?? this.messages,
+      procedureActivities: procedureActivities ?? this.procedureActivities,
       busy: busy ?? this.busy,
       pendingApprovals: clearPendingApprovals
           ? const []

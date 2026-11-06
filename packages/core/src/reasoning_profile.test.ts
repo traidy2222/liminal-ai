@@ -72,11 +72,11 @@ test("stall nudge threshold uses aggressive cap for tool-first coding", () => {
   assert.ok(t >= 450);
 });
 
-test("fallbackReasoningBudget research is tool-first brief", () => {
+test("fallbackReasoningBudget research allows interpreting evidence", () => {
   const b = fallbackReasoningBudget("research", false);
-  assert.equal(b.toolFirstBias, true);
-  assert.equal(b.thinkDepth, "brief");
-  assert.ok(b.reasoningWordBudget <= 200);
+  assert.equal(b.toolFirstBias, false);
+  assert.equal(b.thinkDepth, "standard");
+  assert.ok(b.reasoningWordBudget >= 350);
 });
 
 test("evaluateReasoningStall: below threshold returns none", () => {
@@ -165,11 +165,12 @@ test("evaluateReasoningStall: null budget falls back to 2500 char cap / round ca
   );
 });
 
-test("tightenReasoningBudgetForUserMessage clamps Iran research", () => {
+test("research freshness preserves room for analysis instead of a build-style tool-first clamp", () => {
   const base = fallbackReasoningBudget("knowledge", false);
   const t = tightenReasoningBudgetForUserMessage(base, "update yourself on whats going on with iran");
-  assert.equal(t.toolFirstBias, true);
-  assert.ok(t.reasoningWordBudget <= 140);
+  assert.equal(t.toolFirstBias, false);
+  assert.equal(t.reasoningWordBudget, base.reasoningWordBudget);
+  assert.equal(t.thinkDepth, base.thinkDepth);
 });
 
 test("tightenReasoningBudgetForUserMessage clamps TSP implement trap", () => {
@@ -183,8 +184,10 @@ test("tightenReasoningBudgetForUserMessage clamps TSP implement trap", () => {
   assert.equal(t.essayRisk, true);
 });
 
-test("buildOpenRouterReasoningParam sets max_tokens for tool-first", () => {
+test("buildOpenRouterReasoningParam never combines effort and max_tokens for tool-first", () => {
   const b = fallbackReasoningBudget("coding", false);
   const p = buildOpenRouterReasoningParam(b);
-  assert.ok("reasoning" in p && p.reasoning.max_tokens != null && p.reasoning.max_tokens <= 1536);
+  assert.ok("reasoning" in p);
+  assert.equal(p.reasoning.effort,b.reasoningEffort);
+  assert.equal(p.reasoning.max_tokens,undefined);
 });

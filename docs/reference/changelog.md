@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.26`, 2026-11-05). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.27`, 2026-11-06). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,29 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.27 — 2026-11-06 {#v0-1-27}
+
+**Current beta.** A more capable browser, a faster voice, and a simpler start.
+
+**Shipped**
+
+- **Browser built into each chat** — Keep tabs and the selected page scoped to their conversation while sharing the persistent login profile. Browser-first discovery returns readable page content, handles redirects and timeouts, and preserves useful research evidence and source links.
+- **Lower idle browser overhead** — Bound browser sessions, retire unused agent tabs, preserve user-owned tabs and release idle browser resources. Desktop shutdown cleans up owned workers and bounds background logs.
+- **Cloud or local first run** — Choose a cloud provider or a local OpenAI-compatible server, discover available models, validate tool calling and then generate a persona. Credentials stay in the local secret configuration; interrupted persona generation preserves the previous active persona.
+- **Better provider value and cache visibility** — Compare endpoint prices with measured throughput and latency, prefer a fast low-cost endpoint, and retain the same healthy endpoint to reuse its cache. Record actual cached input tokens, cost, time to first token and endpoint identity; missing provider usage remains unknown.
+- **Stable context and practical tool use** — Keep changing runtime facts outside the stable prompt prefix, reduce repeated instruction and result overhead, and expose browser tools for normal web work. Repair file-edit checks and prevent ordinary documents from being mistaken for outgoing mail.
+- **Chats stay in order** — Opening a chat no longer makes it look recently active. Actual conversation activity controls recency. Optional low-cost OpenRouter titles adapt to substantive work while preserving manual titles.
+- **Wake and keep talking** — Configure a desktop wake phrase, listen while minimized or outside Mission Control, and continue speaking after replies. Mission Control stays conversational while delegated workers run and delivers their completion updates once.
+- **Smoother local voice** — Stream short spoken segments as replies arrive, recover playback and microphone sessions, and reuse warm local audio workers with GPU-aware handoffs. PCM speech detection repairs silent Windows amplitude readings; bounded worker threads reduce idle memory. Cold model startup still depends on the machine.
+- **Windows lifecycle improvements** — Include the native runner, group helper processes with Liminal when Windows package identity is available, and provide optional local identity registration. Portable ZIP installation continues to use the existing updater.
+- **Experimental verified procedures** — Explicitly adopt workspace checks, learn bounded JSON-record procedures from verified outcomes, and reuse named inputs through normal tools and approvals. SQLite preserves evidence and versions across processes; dependency drift suspends stale procedures. General productivity gains are not established.
+- **Docs** — [Browser automation](../guides/browser-automation.md), [First-run setup](../start/quickstart.md), [Voice and wake listening](../guides/voice.md), [Experimental procedural memory](../concepts/procedural-memory.md)
+
+---
+
 ## v0.1.26 — 2026-11-05 {#v0-1-26}
 
-**Current beta.** Keep conversations ready after every reply.
+Keep conversations ready after every reply.
 
 **Shipped**
 

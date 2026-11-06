@@ -78,6 +78,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
       "Typed memory CRUD, consolidation, graph, artifacts, plus cross-chat federation (Phase 2): " +
       "scope-aware writes, sibling-chat aware retrieval, semantic neighbor search, and on-demand consolidation.",
     tools: [
+      "procedure_memory", "procedure_verify", "procedure_run",
       "recall_relevant",
       "remember",
       "recall",
@@ -99,7 +100,7 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   web: {
-    description: "HTTP fetch, search, research, failure review.",
+    description: "Weather, low-level HTTP requests and failure review; standalone search/fetch only when enabled.",
     tools: ["web_fetch", "web_search", "weather_lookup", "failure_review", "http_request"],
   },
   markets: {
@@ -120,9 +121,12 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
   },
   browser: {
     description:
-      "Headless Chromium via Playwright: session loop open → snapshot → act(refs) → close. browser_serve_file for local HTML over http://127.0.0.1. browser_wait_for waits for selector/text/URL/idle. browser_extract pulls structured data (tables, links, forms, meta). browser_cookies saves/loads auth sessions.",
+      "Shared browser with a persistent signed-in profile. browser_tabs lists reusable tabs; open → snapshot → act(refs). Tabs survive turns. Respect user takeover. browser_serve_file serves local previews; browser_extract reads structured data. browser_cookies imports/exports cookies only.",
     tools: [
       "browser_open",
+      "browser_search",
+      "browser_tabs",
+      "browser_credentials",
       "browser_navigate",
       "browser_snapshot",
       "browser_act",
@@ -818,8 +822,8 @@ const ALWAYS_TOOLS_PROFILE_ENV = "AGENT_ALWAYS_TOOLS_PROFILE";
 const ALWAYS_TOOLS_PROFILES = ["balanced", "knowledge_first", "max_autonomy"] as const;
 type AlwaysToolsProfile = (typeof ALWAYS_TOOLS_PROFILES)[number];
 
-// Balanced profile: no extra seeds — activate memory_advanced / web / reasoning on demand.
-const BALANCED_MEMORY_RELIABILITY_TOOLS: readonly string[] = [];
+// Keep ordinary memory usable without loading the whole advanced/vault catalogs.
+const BALANCED_MEMORY_RELIABILITY_TOOLS: readonly string[] = ["remember", "search_memory"];
 const BALANCED_VAULT_RELIABILITY_TOOLS: readonly string[] = [];
 
 const KNOWLEDGE_FIRST_TOOLS = [...TOOL_FAMILIES.memory_advanced.tools, ...TOOL_FAMILIES.vault.tools];
@@ -859,9 +863,11 @@ function getProfileSeedTools(profile: AlwaysToolsProfile): readonly string[] {
 /** Harness-only always tools (orchestration context tools live in orchestration family). */
 export const CORE_HARNESS_TOOLS: readonly string[] = ["check_context"];
 
-function browserAlwaysActiveTools(): readonly string[] {
-  if (effectiveHarnessEnvRaw("AGENT_BROWSER_ALWAYS_ACTIVE") !== "1") return [];
-  return TOOL_FAMILIES.browser.tools;
+function browserAlwaysActiveTools(prefs?:RuntimePreferences|null): readonly string[] {
+  if (effectiveHarnessEnvRaw("AGENT_BROWSER_ALWAYS_ACTIVE") === "1") return TOOL_FAMILIES.browser.tools;
+  // Browser-first still needs a visible search entry point. Otherwise the model
+  // repeatedly discovers disabled fetch/search tools or unrelated MCP servers.
+  return resolveHarnessEnvRaw("AGENT_WEB_SEARCH_FETCH",prefs??null)==="1"?[]:["browser_search"];
 }
 
 export function getCoreAlwaysToolNames(
@@ -871,7 +877,7 @@ export function getCoreAlwaysToolNames(
   const out: string[] = [
     ...CORE_ALWAYS_TOOLS_BASE,
     ...getProfileSeedTools(resolveAlwaysToolsProfile()),
-    ...browserAlwaysActiveTools(),
+    ...browserAlwaysActiveTools(prefs),
   ];
   if (hasHarness) {
     out.push(...CORE_HARNESS_TOOLS);

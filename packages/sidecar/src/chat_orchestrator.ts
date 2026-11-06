@@ -104,6 +104,10 @@ export class ChatOrchestrator {
 
   handleFrame(frame: ServerFrame): void {
     const chatId = frame.chatId;
+    if (chatId === this.snapshot.parentChatId && frame.event === "turn_end") {
+      // Turn-end precedes send() finally. Retry on the next task after admission clears.
+      setTimeout(() => { void this.maybeNotifyParentChat(); }, 0);
+    }
     if (!chatId || !this.autopilotChats.has(chatId)) return;
 
     if (frame.event === "tool_approval") {
@@ -205,13 +209,11 @@ export class ChatOrchestrator {
 
     const bridge = this.deps.registry.get(parentId);
     if (!bridge) return;
-    if (bridge.harness.getIsRunning()) return;
+    if (bridge.isBusy) return;
 
     this.parentNotifiedForId = snap.id;
-    const outcome =
-      snap.status === "completed" && snap.summary?.trim()
-        ? snap.summary.trim()
-        : snap.error?.trim() || `Mission ended with status: ${snap.status}.`;
+    const outcome = [snap.error?.trim(), snap.summary?.trim()].filter(Boolean).join("\n\n")
+      || `Mission ended with status: ${snap.status}.`;
     const workers = snap.workers
       .filter((w) => w.handoff)
       .map(
@@ -232,9 +234,9 @@ export class ChatOrchestrator {
       .join("\n");
 
     try {
-      await bridge.sendUserMessage(message, { freshContext: false });
+      await bridge.sendUserMessage(message, { freshContext: false, liveDictation: bridge.voiceSessionActive });
     } catch {
-      this.parentNotifiedForId = null;
+      if (this.parentNotifiedForId === snap.id) this.parentNotifiedForId = null;
     }
   }
 
@@ -319,8 +321,10 @@ export class ChatOrchestrator {
       if (!this.isCurrentRun(id)) return;
       this.snapshot.summary = synthesis.text;
       this.snapshot.synthesisChatId = synthesis.chatId;
-      this.snapshot.status = "completed";
-      this.snapshot.phase = "Done";
+      const incomplete = this.snapshot.workers.filter(w => w.status !== "done" || w.handoff?.status !== "done");
+      this.snapshot.status = incomplete.length ? "failed" : "completed";
+      this.snapshot.phase = incomplete.length ? "Incomplete" : "Done";
+      if (incomplete.length) this.snapshot.error = `${incomplete.length} worker task(s) did not complete: ${incomplete.map(w => w.title).join(", ")}`;
     } catch (err) {
       if (!this.isCurrentRun(id)) return;
       this.snapshot.status = "failed";

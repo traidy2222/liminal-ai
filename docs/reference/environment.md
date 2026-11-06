@@ -57,15 +57,18 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_BROWSER_EMBED` | `1` | yes | no | web_research | Stream viewport previews to the desktop browser dock via browser_view events. |
 | `AGENT_BROWSER_FILE_ROOT` | `` | yes | no | harness | Harness environment toggle for Browser File Root. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_HEADED` | `0` | yes | no | harness | Harness environment toggle for Browser Headed. See docs/configuration.md (harness). |
-| `AGENT_BROWSER_MAX_SESSIONS` | `2` | yes | no | session_ui | Harness environment toggle for Browser Max Sessions. See docs/configuration.md (session ui). |
-| `AGENT_BROWSER_NAV_TIMEOUT_MS` | `45000` | yes | no | harness | Harness environment toggle for Browser Nav Timeout Ms. See docs/configuration.md (harness). |
-| `AGENT_BROWSER_SESSION_TTL_MS` | `120000` | yes | no | session_ui | Harness environment toggle for Browser Session Ttl Ms. See docs/configuration.md (session ui). |
+| `AGENT_BROWSER_MAX_LIVE_TABS` | `4` | yes | no | session_ui | Maximum live browser pages across all chats (1–12, default 4). Eligible background tabs sleep to free memory and load ag |
+| `AGENT_BROWSER_MAX_SESSIONS` | `8` | yes | no | session_ui | Harness environment toggle for Browser Max Sessions. See docs/configuration.md (session ui). |
+| `AGENT_BROWSER_NAV_TIMEOUT_MS` | `20000` | yes | no | harness | Harness environment toggle for Browser Nav Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_BROWSER_SESSION_TTL_MS` | `120000` | yes | no | session_ui | Park inactive browser pages after this interval. Tab locations and logins are retained; visible pages, active work, medi |
 | `AGENT_BROWSER_TYPE_DELAY_MS` | `30` | yes | no | harness | Harness environment toggle for Browser Type Delay Ms. See docs/configuration.md (harness). |
 | `AGENT_BROWSER_WALL_MS` | `120000` | yes | no | harness | Harness environment toggle for Browser Wall Ms. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_POLL_MS` | `3000` | yes | no | harness | Harness environment toggle for Captcha Poll Ms. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_SERVICE` | `2captcha` | yes | no | harness | Harness environment toggle for Captcha Service. See docs/configuration.md (harness). |
 | `AGENT_CAPTCHA_TIMEOUT_MS` | `120000` | yes | no | harness | Harness environment toggle for Captcha Timeout Ms. See docs/configuration.md (harness). |
+| `AGENT_CHAT_AUTO_TITLE` | `1` | yes | no | models_api | Generate and periodically refresh chat labels in the background using a separate inexpensive OpenRouter model. Manual ti |
 | `AGENT_CHAT_BOOT` | `restore_last` | yes | no | session_ui | Which chat to open on startup: restore_last (default), new_chat, or most_recent. Shared across web, desktop, and TUI. |
+| `AGENT_CHAT_TITLE_MODEL` | `inclusionai/ling-3.0-tiny` | yes | no | models_api | OpenRouter model for chat labels only; defaults to inclusionai/ling-3.0-tiny. Does not change the main agent model. |
 | `AGENT_CHILD_TIMEOUT_MS` | `1800000` | yes | no | harness | Harness environment toggle for Child Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_COMPENSATION_ENABLED` | `1` | yes | no | harness | Harness environment toggle for Compensation Enabled. See docs/configuration.md (harness). |
 | `AGENT_COMPENSATION_MAX_ACTIONS` | `32` | yes | no | harness | Harness environment toggle for Compensation Max Actions. See docs/configuration.md (harness). |
@@ -173,7 +176,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_INTENT_REPO_CONTEXT` | `1` | yes | no | harness | Harness environment toggle for Intent Repo Context. See docs/configuration.md (harness). |
 | `AGENT_INTENT_ROUTING` | `1` | yes | no | harness | Harness environment toggle for Intent Routing. See docs/configuration.md (harness). |
 | `AGENT_KIMCHI_MIN_INTERVAL_MS` | `1500` | yes | no | models_api | Minimum ms between Cast AI completions when AGENT_PROVIDER_MIN_INTERVAL_MS is unset. Lowers RPM/TPM 429s on free tier. |
-| `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES` | `8` | yes | yes | models_api | Retry budget for transient Cast AI / Kimchi errors (opaque HTTP 400, 429, 5xx) per completion before failing the turn. |
+| `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES` | `8` | yes | no | models_api | Retry budget for transient Cast AI / Kimchi errors (opaque HTTP 400, 429, 5xx) per completion before failing the turn. |
 | `AGENT_LATENCY_MODE` | `0` | yes | no | harness | When on, skips world-context gather, intent-inference LLM, proactive verify lint, session JSONL, forced reply-finalize,  |
 | `AGENT_LENGTH_RESUME_MAX` | `8` | yes | no | harness | Harness environment toggle for Length Resume Max. See docs/configuration.md (harness). |
 | `AGENT_LICENSE_PREFER_ENV` | `0` | yes | no | harness | Harness environment toggle for License Prefer Env. See docs/configuration.md (harness). |
@@ -265,10 +268,12 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PROVIDER_MIN_INTERVAL_MS` | `0` | yes | no | models_api | Harness environment toggle for Provider Min Interval Ms. See docs/configuration.md (models api). |
 | `AGENT_PROVIDER_ORDER` | `` | yes | no | harness | Harness environment toggle for Provider Order. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_ORDER_FAST` | `` | yes | no | harness | Harness environment toggle for Provider Order Fast. See docs/configuration.md (harness). |
+| `AGENT_PROVIDER_PREFERRED_MAX_LATENCY` | `1` | yes | no | models_api | Adaptive routing prefers endpoints with median latency at or below this value, then sorts by price. A soft preference, n |
+| `AGENT_PROVIDER_PREFERRED_MIN_THROUGHPUT` | `80` | yes | no | models_api | Adaptive routing prefers endpoints meeting this median output speed, then sorts by price. Slower endpoints remain availa |
 | `AGENT_PROVIDER_ROUTE_AUTO` | `1` | yes | no | harness | Harness environment toggle for Provider Route Auto. See docs/configuration.md (harness). |
 | `AGENT_PROVIDER_SESSION_EPOCH_ON_429` | `1` | yes | no | session_ui | Harness environment toggle for Provider Session Epoch On 429. See docs/configuration.md (session ui). |
 | `AGENT_PROVIDER_SORT` | `` | yes | no | harness | Harness environment toggle for Provider Sort. See docs/configuration.md (harness). |
-| `AGENT_PROVIDER_STRATEGY` | `latency` | yes | no | harness | OpenRouter routing for the selected model. Default latency prioritizes responsive providers; price prioritizes the lowes |
+| `AGENT_PROVIDER_STRATEGY` | `adaptive` | yes | no | harness | Default adaptive ranks standard endpoints by current input/output/cache cost and TPS/latency, including recent local mea |
 | `AGENT_PSEUDO_TOOL_RETRY_MAX` | `2` | yes | no | harness | Harness environment toggle for Pseudo Tool Retry Max. See docs/configuration.md (harness). |
 | `AGENT_QUERY_REWRITE` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite. See docs/configuration.md (memory vault). |
 | `AGENT_QUERY_REWRITE_EXPLORATORY` | `0` | yes | no | memory_vault | Harness environment toggle for Query Rewrite Exploratory. See docs/configuration.md (memory vault). |
@@ -283,14 +288,14 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_RECALL_RERANK` | `0` | yes | no | memory_vault | Harness environment toggle for Recall Rerank. See docs/configuration.md (memory vault). |
 | `AGENT_RECALL_RERANK_WEIGHT` | `1.0` | yes | no | memory_vault | Harness environment toggle for Recall Rerank Weight. See docs/configuration.md (memory vault). |
 | `AGENT_RECIPE_LIBRARY` | `1` | yes | no | advanced | Harness environment toggle for Recipe Library. See docs/configuration.md (advanced). |
-| `AGENT_RECIPE_PRIME` | `1` | yes | no | advanced | At round 2, inject the best matching success recipe for the turn intent (zero extra model calls). Low-outcome turns deca |
+| `AGENT_RECIPE_PRIME` | `0` | yes | no | advanced | Legacy compatibility setting. Automatic recipe priming is retired; relevant history is optional evidence, not a required |
 | `AGENT_REFLEXION_SEMANTIC` | `1` | yes | no | harness | Harness environment toggle for Reflexion Semantic. See docs/configuration.md (harness). |
 | `AGENT_RETRY_FOREVER` | `0` | yes | no | models_api | Harness environment toggle for Retry Forever. See docs/configuration.md (models api). |
 | `AGENT_RETRY_MAX_DELAY_MS` | `30000` | yes | no | models_api | Harness environment toggle for Retry Max Delay Ms. See docs/configuration.md (models api). |
 | `AGENT_RETRY_WALL_TIME_MS` | `90000` | yes | no | models_api | Harness environment toggle for Retry Wall Time Ms. See docs/configuration.md (models api). |
 | `AGENT_RULE_DEMOTE_MIN_SAMPLES` | `20` | yes | no | harness | Harness environment toggle for Rule Demote Min Samples. See docs/configuration.md (harness). |
 | `AGENT_RULE_DEMOTE_THRESHOLD` | `0.4` | yes | no | harness | Harness environment toggle for Rule Demote Threshold. See docs/configuration.md (harness). |
-| `AGENT_RULE_RECALL` | `1` | yes | no | memory_vault | Harness environment toggle for Rule Recall. See docs/configuration.md (memory vault). |
+| `AGENT_RULE_RECALL` | `0` | yes | no | memory_vault | Legacy compatibility setting. Automatic round-two rule reminders are retired; stable protocol guidance remains active. |
 | `AGENT_SAFETY_JUDGE` | `0` | yes | no | safety | Harness environment toggle for Safety Judge. See docs/configuration.md (safety). |
 | `AGENT_SAFETY_JUDGE_MODEL` | `deepseek/deepseek-v4-flash` | yes | no | safety | Harness environment toggle for Safety Judge Model. See docs/configuration.md (safety). |
 | `AGENT_SELF_HEAL_LINT` | `0` | yes | no | harness | Harness environment toggle for Self Heal Lint. See docs/configuration.md (harness). |
@@ -331,7 +336,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TRANSCRIBE_MODEL` | `local/whisper-large-v3-turbo` | yes | no | session_ui | Whisper fast is the offline default (1.6 GB). Qwen accuracy is optional (4.7 GB), uses more memory, and supports fewer l |
 | `AGENT_TRANSCRIBE_TIMEOUT_MS` | `120000` | yes | no | harness | Harness environment toggle for Transcribe Timeout Ms. See docs/configuration.md (harness). |
 | `AGENT_TRANSCRIBE_TIMESTAMPS` | `segment` | yes | no | harness | Harness environment toggle for Transcribe Timestamps. See docs/configuration.md (harness). |
-| `AGENT_TRANSIENT_5XX_MAX_RETRIES` | `8` | yes | yes | models_api | Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api). |
+| `AGENT_TRANSIENT_5XX_MAX_RETRIES` | `8` | yes | no | models_api | Harness environment toggle for Transient 5xx Max Retries. See docs/configuration.md (models api). |
 | `AGENT_TTS_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | harness | Harness environment toggle for Tts Base Url. See docs/configuration.md (harness). |
 | `AGENT_TTS_CHUNK_CHARS` | `400` | yes | no | harness | Harness environment toggle for Tts Chunk Chars. See docs/configuration.md (harness). |
 | `AGENT_TTS_ENABLED` | `0` | yes | no | harness | Harness environment toggle for Tts Enabled. See docs/configuration.md (harness). |
@@ -365,6 +370,9 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
 | `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
 | `AGENT_VISION_TIMEOUT_MS` | `45000` | yes | no | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
+| `AGENT_WAKE_WORD_ENABLED` | `0` | yes | no | session_ui | Desktop: listen locally while Liminal is open, including minimized. Wake requests go to Mission Control. Enable spoken r |
+| `AGENT_WAKE_WORD_IDLE_SECONDS` | `45` | yes | no | session_ui | Return to wake listening after this much quiet time. Follow-ups need no wake phrase while awake. Agent replies and playb |
+| `AGENT_WAKE_WORD_PHRASE` | `Hey Jarvis` | yes | no | session_ui | Say this phrase first, followed by your request, or pause and give your request next. Default: Hey Jarvis. Use a distinc |
 | `AGENT_WEB_FETCH_403_RETRY` | `1` | yes | no | web_research | Harness environment toggle for Web Fetch 403 Retry. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_ACCEPT_LANGUAGE` | `` | yes | no | web_research | Harness environment toggle for Web Fetch Accept Language. See docs/configuration.md (web research). |
 | `AGENT_WEB_FETCH_ALT_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0` | yes | no | web_research | Harness environment toggle for Web Fetch Alt User Agent. See docs/configuration.md (web research). |
@@ -385,6 +393,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_WEB_READABILITY` | `1` | yes | no | web_research | Harness environment toggle for Web Readability. See docs/configuration.md (web research). |
 | `AGENT_WEB_RESEARCH` | `1` | yes | no | web_research | Harness environment toggle for Web Research. See docs/configuration.md (web research). |
 | `AGENT_WEB_SEARCH_FALLBACK` | `1` | yes | no | web_research | When serper is selected and fails, retry once via DuckDuckGo (1 = on). |
+| `AGENT_WEB_SEARCH_FETCH` | `0` | yes | no | web_research | Off for browser-first research: search/fetch are disabled and generic HTTP, market quotes and weather lookups are hidden |
 | `AGENT_WEB_SEARCH_PROVIDER` | `duckduckgo` | yes | no | web_research | Backend for web_search: duckduckgo (default, no API key) or serper (Google organic via serper.dev — requires AGENT_SERPE |
 | `AGENT_WORKFLOWS` | `1` | yes | no | harness | Harness environment toggle for Workflows. See docs/configuration.md (harness). |
 | `AGENT_WORKFLOW_MAX_AGENTS` | `64` | yes | no | harness | Harness environment toggle for Workflow Max Agents. See docs/configuration.md (harness). |
@@ -408,12 +417,11 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 - `AGENT_APPROVAL_TIMEOUT_MS`
 - `AGENT_CAPTCHA_KEY`
 - `AGENT_INFERENCE_SESSION_TOKEN`
-- `AGENT_KIMCHI_TRANSIENT_MAX_RETRIES`
+- `AGENT_LOCAL_API_KEY`
 - `AGENT_OAUTH_ENCRYPTION_KEY`
 - `AGENT_RATE_LIMIT_MAX_RETRIES`
 - `AGENT_SERPER_API_KEY`
 - `AGENT_TRANSCRIBE_API_KEY`
-- `AGENT_TRANSIENT_5XX_MAX_RETRIES`
 - `AGENT_UI_VERBOSITY`
 - `AGENT_USER_REPLY_FINALIZE`
 - `AGENT_VAULT_AUTO_WRITE`

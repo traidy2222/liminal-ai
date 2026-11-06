@@ -75,30 +75,7 @@ export function validateOutboundEmailFactual(args: Record<string, unknown>): str
   return detectEmailPlaceholderViolations(combined);
 }
 
+/** Presentation is user-directed. Preserve factual checks for both new mail and replies. */
 export function validateOutboundEmailStyle(args: Record<string, unknown>): string | null {
-  if (isGmailThreadReply(args)) return null;
-
-  const factualErr = validateOutboundEmailFactual(args);
-  if (factualErr) return factualErr;
-
-  const html = pickEmailHtmlField(args);
-  const plain = pickEmailPlainField(args);
-
-  if (html) {
-    if (looksLikeFormattedEmailHtml(html)) return null;
-    return (
-      "body_html must use intentional email-safe styling (nested tables and/or inline styles on text elements). " +
-      "Compose the full formatted HTML before calling create_draft — the tool call is the deliverable."
-    );
-  }
-
-  if (plain && isSubstantivePlainBody(plain)) {
-    return (
-      "New outbound mail is delivered as formatted body_html + plain body in one create_draft call. " +
-      "Plan and write the HTML first, then call gmail_create_draft / outlook_create_draft with both fields. " +
-      "Plain-only is for thread replies and one-liners."
-    );
-  }
-
-  return null;
+  return validateOutboundEmailFactual(args);
 }

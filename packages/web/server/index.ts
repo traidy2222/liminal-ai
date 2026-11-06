@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import express from "express";
 import cors from "cors";
-import { effectiveHarnessEnvRaw, warmupConfiguredTranscription } from "@liminal/core";
+import { effectiveHarnessEnvRaw, warmupConfiguredTranscription,providerConnectionConfigured } from "@liminal/core";
 import { SSEManager } from "./sse.js";
 import { ChatManager } from "./chatManager.js";
 import { createRouter } from "./routes.js";
@@ -29,6 +29,7 @@ import {
   setPtyShellPort,
   setTerminalEnsureHandler,
   setTerminalViewPublisher,
+  shutdownBrowserWorkspace,
 } from "@liminal/tools";
 import { createWebPtyShellPort } from "./pty_shell_port.js";
 import { WebRemoteService } from "./web_remote.js";
@@ -268,7 +269,7 @@ server.requestTimeout = 0;
 // Greeting / bootstrap can take a model round — do not block `listen()` on that or
 // `web:dev` clients on :5173 see ECONNREFUSED while Vite is already up.
 void chatManager.getActive().whenSessionReady().then(() => {
-  void warmupConfiguredTranscription(chatManager.getActive().harness.getRuntimePreferences());
+  if(providerConnectionConfigured(chatManager.getActive().harness.config.openRouterApiKey))void warmupConfiguredTranscription(chatManager.getActive().harness.getRuntimePreferences());
 }).catch((err) => {
   console.error(
     "Agent session initialization failed:",
@@ -281,13 +282,14 @@ void chatManager.getActive().whenSessionReady().then(() => {
 // descriptors (session log streams, write_staging stream sinks) close cleanly.
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.once(sig, () => {
+    const browserShutdown = shutdownBrowserWorkspace().catch(() => undefined);
     try {
       chatManager.shutdown();
       webRemote.dispose();
       ptyCtx.ptyManager.disposeAll();
     } finally {
-      server.close(() => process.exit(0));
-      setTimeout(() => process.exit(0), 2000).unref();
+      server.close(() => { void browserShutdown.finally(() => process.exit(0)); });
+      setTimeout(() => process.exit(0), 5000).unref();
     }
   });
 }

@@ -1,6 +1,7 @@
 /**
  * Playwright browser session runtime — shared by browser_* tools.
- * Sessions persist across tool calls within a harness turn until close or turn_end cleanup.
+ * Tab identity survives turns; idle pages sleep and wake in the shared profile.
+ * The UI and agent operate the same live page.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -8,10 +9,17 @@ import { createServer, type Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { effectiveHarnessEnvRaw, resolveWorkspaceRoot } from "@liminal/core";
-import type { Page, Browser, BrowserContext } from "playwright";
+import type { Page, Browser, BrowserContext, Locator, Frame } from "playwright";
+import { acquireBrowserPage, releaseBrowserPage, shutdownBrowserProfile, browserProfileRoot,
+  readBrowserWorkspace, saveBrowserWorkspace, ownsBrowserProfile, lockBrowserProfile, type BrowserTabRecord } from "./browser_profile.js";
+import { prepareBrowserLogin, savedBrowserLogins, readBrowserLoginForFill } from "./browser_credentials.js";
+import { BrowserObservations, formatBrowserSnapshot } from "./browser_observation.js";
+import { pageExtractedItems } from "./browser_extraction.js";
+import {withBrowserTask,browserTaskIsActive} from './browser_queue.js';
 import {
   startBrowserScreencast,
   stopBrowserScreencastForSession,
+  browserScreencastHasSubscribers,
 } from "./browser_screencast.js";
 
 export type WaitUntilNav = "domcontentloaded" | "load" | "networkidle";
@@ -22,23 +30,23 @@ export interface SnapshotRef {
   exact?: boolean;
   /** CSS selector from DOM fallback (preferred for click_ref when present). */
   selector?: string;
+  frame?: Frame;
 }
 
-type A11yNode = {
-  role?: string;
-  name?: string;
-  value?: string;
-  children?: A11yNode[];
-};
+
 
 export type BrowserActOp =
   | { op: "wait_ms"; ms: number }
+  | { op: "reload"; wait_until?: WaitUntilNav; timeout_ms?: number }
   | { op: "scroll"; direction: "bottom" | "top" | "down" | "up"; px?: number }
   | { op: "wait_selector"; selector: string; state?: "visible" | "attached"; timeout_ms?: number }
   | { op: "click_selector"; selector: string; timeout_ms?: number }
   | { op: "click_role"; role: string; name: string; exact?: boolean; timeout_ms?: number }
   | { op: "click_text"; text: string; exact?: boolean; timeout_ms?: number }
   | { op: "click_ref"; ref: string; timeout_ms?: number }
+  | { op: "check_ref" | "uncheck_ref"; ref: string; timeout_ms?: number }
+  | { op: "double_click_ref"; ref: string; timeout_ms?: number }
+  | { op: "double_click_text"; text: string; exact?: boolean; timeout_ms?: number }
   | { op: "fill"; selector: string; value: string; timeout_ms?: number }
   | { op: "fill_ref"; ref: string; value: string; timeout_ms?: number }
   | { op: "focus_ref"; ref: string; timeout_ms?: number }
@@ -51,6 +59,7 @@ export type BrowserActOp =
   | { op: "press_key"; key: string }
   | { op: "wait_navigation"; wait_until?: WaitUntilNav; timeout_ms?: number }
   | { op: "select_option"; selector: string; value: string; timeout_ms?: number }
+  | { op: "select_option_ref"; ref: string; value: string; timeout_ms?: number }
   | { op: "check"; selector: string; timeout_ms?: number }
   | { op: "uncheck"; selector: string; timeout_ms?: number }
   | { op: "screenshot"; full_page?: boolean };
@@ -79,9 +88,118 @@ interface BrowserSession {
   createdAt: number;
   lastUsedAt: number;
   lastScreenshotPath?: string;
+  backend?: "webview" | "screencast";
+  title?: string;
+  paused?: boolean;
+  restoreUrl?: string;
+  observations?: BrowserObservations;
 }
 
 const sessions = new Map<string, BrowserSession>();
+function observationFor(session: BrowserSession, snapshot: string, full = false): string {
+  session.observations ??= new BrowserObservations();
+  return session.observations.format(session.page.url(), snapshot, full);
+}
+// The native host can disappear before the daemon receives its shutdown signal.
+// Preserve unexpectedly detached tabs so that closing the app does not erase them.
+const dormantTabs = new Map<string, BrowserTabRecord>();
+const openingTabs = new Map<string, number>();
+let stopping = false;
+let restoring = false;
+const selectedTaskTabs = new Map<string, string>();
+const visibleTabs=new Set<string>();
+const busyBrowserTasks=new Map<string,()=>boolean>();
+const registeredBrowserHarnesses=new WeakSet<object>();
+const hibernatingTabs=new Map<string,Promise<boolean>>();
+const wakingTabs=new Map<string,Promise<{ok:true;sessionId:string;output:string}|{ok:false;error:string}>>();
+let idleTimer:ReturnType<typeof setInterval>|undefined;
+let capacityQueue=Promise.resolve();
+
+export function browserWorkspaceState(ownerTaskId?: string) {
+  const live = [...sessions.values()].filter(s => !ownerTaskId || s.ownerTaskId === ownerTaskId).map(s => ({
+    sessionId: s.sessionId, ownerTaskId: s.ownerTaskId, url: s.currentUrl,
+    title: s.title || "Browser", paused: s.paused === true, backend: s.backend ?? "screencast",suspended:false,lastUsedAt:s.lastUsedAt,
+  }));
+  const tabs=[...[...dormantTabs.values()].filter(t=>!sessions.has(t.sessionId)&&(!ownerTaskId||t.ownerTaskId===ownerTaskId)).map(t=>({...t,suspended:true,backend:'dormant'})),...live];
+  const selected = ownerTaskId ? selectedTaskTabs.get(ownerTaskId) : undefined;
+  return { profile: "default", profilePath: browserProfileRoot(), tabs,
+    selectedTabId: ownerTaskId ? tabs.find(t => t.sessionId === selected)?.sessionId ?? tabs.at(-1)?.sessionId ?? null : null,
+    selectedTabs: Object.fromEntries([...selectedTaskTabs].filter(([owner]) => !ownerTaskId || owner === ownerTaskId)),
+    history: readBrowserWorkspace().history,liveTabCount:sessions.size,suspendedTabCount:dormantTabs.size };
+}
+
+export function selectBrowserTaskTab(ownerTaskId: string, sessionId: string): void {
+  if ((sessions.get(sessionId)??dormantTabs.get(sessionId))?.ownerTaskId !== ownerTaskId) return;
+  selectedTaskTabs.set(ownerTaskId, sessionId);
+  persistBrowserTabs();
+}
+
+function persistBrowserTabs(visit?: { url: string; title: string }): void {
+  if (stopping || restoring || !ownsBrowserProfile()) return;
+  const tabs: BrowserTabRecord[] = browserWorkspaceState().tabs;
+  saveBrowserWorkspace(tabs, visit, Object.fromEntries(selectedTaskTabs));
+}
+
+export function checkBrowserSessionOwner(sessionId: string, taskId: string): string | undefined {
+  const session = sessions.get(sessionId)??dormantTabs.get(sessionId);
+  if (session?.paused) return "User takeover is active. Wait for the user to resume agent control of this tab.";
+  if (session && session.ownerTaskId !== taskId) {
+    return "This tab belongs to another agent. Use browser_tabs to find your tabs or open a separate tab.";
+  }
+  return undefined;
+}
+
+export async function browserCredentialAction(args: Record<string, unknown>) {
+  const session = sessions.get(String(args.session_id ?? ""));
+  if (!session) return { ok: false as const, error: "Browser session not found" };
+  if (session.paused) return { ok: false as const, error: "User takeover is active" };
+  try {
+    if (args.action === "prepare") return { ok: true as const, output: JSON.stringify({ login: prepareBrowserLogin(session.page.url(), String(args.username ?? "")), status: "credential_saved_account_not_yet_verified" }) };
+    if (args.action === "list") return { ok: true as const, output: JSON.stringify({ logins: savedBrowserLogins(session.page.url()) }) };
+    if (args.action !== "fill") return { ok: false as const, error: "action must be prepare, fill or list" };
+    const fields: Record<string, Locator> = {};
+    for(const key of ["username_ref","password_ref","confirm_password_ref"]){
+      const ref=args[key];if(ref==null&&key!=="password_ref")continue;
+      if(typeof ref!=="string"||!/^e\d+$/.test(ref))return {ok:false as const,error:`${key} must be an e-number from the current SNAPSHOT_REFS, not a selector or DOM marker.`};
+      const meta=session.refs.get(ref);if(!meta)return {ok:false as const,error:`Unknown ref ${ref}; call browser_snapshot for current refs.`};
+      if(meta.frame&&new URL(meta.frame.url()).origin!==new URL(session.page.url()).origin)return {ok:false as const,error:"The credential field is in a different origin. Open the actual sign-in site before filling."};
+      const field=resolveRefLocator(session.page,ref,session.refs);
+      const valid=await field.evaluate(el=>el instanceof HTMLInputElement&&el.type==='password',undefined,{timeout:5000}).catch(()=>false);
+      if(key!=='username_ref'&&!valid)return {ok:false as const,error:`${key} ${ref} is not a current password input. Refresh the snapshot.`};
+      fields[key]=field;
+    }
+    const login=readBrowserLoginForFill(session.page.url(),String(args.credential_id??''));
+    if(fields.username_ref)await fields.username_ref.fill(login.username,{timeout:5000});
+    await fields.password_ref!.fill(login.password,{timeout:5000});
+    if(fields.confirm_password_ref)await fields.confirm_password_ref.fill(login.password,{timeout:5000});
+    return { ok: true as const, output: "SAVED_LOGIN_FILLED: password remains in the encrypted local store. Submit and verify the account page separately." };
+  } catch {
+    // Locator failures may include the input value; keep generated passwords out of traces.
+    return { ok: false as const, error: "Saved login operation failed. Check the origin, credential id and fresh input refs; the stored password was not exposed." };
+  }
+}
+
+function attachSessionLifecycle(session: BrowserSession): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  session.page.on("framenavigated", frame => {
+    if (frame !== session.page.mainFrame()) return;
+    if (!session.page.url().startsWith("chrome-error:") && session.page.url() !== "about:blank") session.restoreUrl = undefined;
+    session.currentUrl = session.restoreUrl ?? session.page.url(); session.refs.clear();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => { void publishBrowserView(session, true).catch(() => undefined); }, 150);
+    timer.unref();
+  });
+  session.page.on("close", () => {
+    if (timer) clearTimeout(timer);
+    if (!sessions.delete(session.sessionId)) return;
+    if (session.backend === "webview" && !stopping) dormantTabs.set(session.sessionId, {
+      sessionId: session.sessionId, ownerTaskId: session.ownerTaskId, url: session.currentUrl,
+      title: session.title || "Browser", paused: session.paused === true,
+    });
+    publishBrowserViewClosed(session.sessionId);
+    persistBrowserTabs();
+  });
+}
 
 export type BrowserViewPayload = {
   sessionId: string;
@@ -96,6 +214,7 @@ export type BrowserViewPayload = {
   liveStream?: boolean;
   /** `webview` = native embed (desktop); `screencast` = JPEG stream (web fallback). */
   embedMode?: "webview" | "screencast";
+  paused?: boolean;
 };
 
 /** Minimal session handle for stream handlers (sidecar / web). */
@@ -207,7 +326,10 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
   let title: string | undefined;
   if (open) {
     title = (await session.page.title().catch(() => "")) || undefined;
-    const buf = await capturePanelFrame(session.page);
+    session.title = title;
+    session.currentUrl = session.restoreUrl ?? session.page.url();
+    persistBrowserTabs({ url: session.currentUrl, title: title || "Browser" });
+    const buf = session.backend === "webview" ? null : panelFrames.get(session.sessionId) ?? await capturePanelFrame(session.page);
     if (!sessions.has(session.sessionId)) return;
     if (buf) {
       panelFrames.set(session.sessionId, buf);
@@ -224,9 +346,6 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
   const vp = session.page.viewportSize();
   const viewportWidth = vp?.width ?? 1280;
   const viewportHeight = vp?.height ?? 800;
-  if (open && effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast") {
-    void startBrowserScreencast(session.sessionId).catch(() => undefined);
-  }
   const publisher =
     browserViewPublishers.get(session.ownerTaskId) ??
     browserViewPublishers.get("__default__");
@@ -240,11 +359,9 @@ async function publishBrowserView(session: BrowserSession, open: boolean): Promi
     updatedAt: Date.now(),
     viewportWidth,
     viewportHeight,
-    liveStream: open && effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast",
-    embedMode:
-      effectiveHarnessEnvRaw("AGENT_BROWSER_EMBED_MODE") === "screencast"
-        ? "screencast"
-        : "webview",
+    liveStream: open,
+    embedMode: session.backend ?? "screencast",
+    paused: session.paused === true,
   });
 }
 
@@ -476,11 +593,11 @@ function attachDiagnostics(page: Page, b: DiagnosticBuffers): void {
 }
 
 export function formatDiagnosticsOutput(b: DiagnosticBuffers): string {
-  const con = b.consoleMsgs.slice(-30).join("\n") || "(none)";
+  const con = [...new Set(b.consoleMsgs)].slice(-8).join("\n").slice(0,1500) || "(none)";
   const pe = b.pageErrors.length
-    ? b.pageErrors.slice(-12).join("\n\n--- page error ---\n\n")
+    ? [...new Set(b.pageErrors)].slice(-3).join("\n\n--- page error ---\n\n").slice(0,1500)
     : "(none)";
-  const fr = b.failedReqs.slice(-20).join("\n") || "(none)";
+  const fr = [...new Set(b.failedReqs)].slice(-5).join("\n").slice(0,1000) || "(none)";
   return (
     `\nCONSOLE:\n${con}\nPAGE_ERRORS:\n${pe}\nFAILED_REQUESTS:\n${fr}`
   );
@@ -513,21 +630,60 @@ export function collectBrowserDiagnosticsForTask(taskId: string): string | null 
 
 function maxSessionsPerTask(): number {
   const n = parseInt(effectiveHarnessEnvRaw("AGENT_BROWSER_MAX_SESSIONS") ?? "2", 10);
-  return Number.isFinite(n) ? Math.max(1, Math.min(4, n)) : 2;
+  return Number.isFinite(n) ? Math.max(1, Math.min(16, n)) : 8;
 }
 
 function sessionTtlMs(): number {
   return parseHarnessMs("AGENT_BROWSER_SESSION_TTL_MS", 120_000, 600_000);
 }
 
-function evictStaleSessions(): void {
-  const ttl = sessionTtlMs();
-  const now = Date.now();
-  for (const [id, s] of sessions) {
-    if (now - s.lastUsedAt > ttl) {
-      void closeBrowserSession({ sessionId: id }).catch(() => undefined);
-    }
+function browserTaskBusy(taskId:string){return browserTaskIsActive(taskId)||busyBrowserTasks.get(taskId)?.()===true;}
+function startBrowserIdleCleanup(){if(!idleTimer){idleTimer=setInterval(()=>{void hibernateIdleBrowserTabs().catch(()=>{});},30000);idleTimer.unref();}}
+async function safeToHibernate(session:BrowserSession):Promise<boolean>{
+ if(session.paused||visibleTabs.has(session.sessionId)||browserScreencastHasSubscribers(session.sessionId)||browserTaskBusy(session.ownerTaskId))return false;
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{return await Promise.race([session.page.evaluate(()=>{
+  if(window.onbeforeunload||[...document.querySelectorAll('audio,video')].some(el=>!(el as HTMLMediaElement).paused&&!(el as HTMLMediaElement).ended))return false;
+  if((window as unknown as Record<string,unknown>).__liminalUnsavedEdits)return false;
+  return ![...document.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>('input,textarea,select')].some(el=>{
+   if(el instanceof HTMLInputElement){if(['hidden','search','submit','button'].includes(el.type)||/^(q|query|search)$/i.test(el.name))return false;if(['checkbox','radio'].includes(el.type))return el.checked!==el.defaultChecked;return el.value!==el.defaultValue;}
+   if(el instanceof HTMLTextAreaElement)return el.value!==el.defaultValue;
+   return [...el.options].some(o=>o.selected!==o.defaultSelected);
+  });
+ }).catch(()=>false),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),1500);timer.unref();})]);}
+ finally{if(timer)clearTimeout(timer);}
+}
+async function hibernateBrowserTab(id:string):Promise<boolean>{
+ if(hibernatingTabs.has(id))return false;
+ const work=(async()=>{
+  const session=sessions.get(id),lastUsedAt=session?.lastUsedAt;
+  if(!session||!await safeToHibernate(session)||sessions.get(id)!==session||lastUsedAt!==session.lastUsedAt||browserTaskBusy(session.ownerTaskId)||visibleTabs.has(id)||browserScreencastHasSubscribers(id))return false;
+  dormantTabs.set(id,{sessionId:id,ownerTaskId:session.ownerTaskId,url:session.currentUrl,title:session.title||'Browser',paused:session.paused===true,lastUsedAt:session.lastUsedAt});
+  sessions.delete(id);publishBrowserViewClosed(id);persistBrowserTabs();
+  if(session.backend)await releaseBrowserPage(id,session.page,session.backend).catch(()=>{});else await session.browser.close().catch(()=>{});
+  return true;
+ })();hibernatingTabs.set(id,work);
+ try{return await work;}finally{hibernatingTabs.delete(id);}
+}
+export async function hibernateIdleBrowserTabs(now=Date.now()):Promise<number>{
+ let count=0;for(const session of [...sessions.values()])if(now-session.lastUsedAt>sessionTtlMs()&&await hibernateBrowserTab(session.sessionId))count++;return count;
+}
+async function reserveBrowserSlot(owner:string):Promise<string|undefined>{
+ const reserve=capacityQueue.then(async()=>{
+  const limit=Math.max(1,Math.min(12,parseInt(effectiveHarnessEnvRaw('AGENT_BROWSER_MAX_LIVE_TABS')??'4',10)||4)),opening=()=>[...openingTabs.values()].reduce((a,b)=>a+b,0);
+  for(const session of [...sessions.values()].sort((a,b)=>a.lastUsedAt-b.lastUsedAt)){
+   if(sessions.size+opening()<limit)break;await hibernateBrowserTab(session.sessionId);
   }
+  if(sessions.size+opening()>=limit)return 'All live browser slots are active or contain unsaved work. Close a tab or finish the other browser task, then retry.';
+  openingTabs.set(owner,(openingTabs.get(owner)??0)+1);return undefined;
+ });capacityQueue=reserve.then(()=>{},()=>{});return reserve;
+}
+export async function ensureBrowserSessionActive(id:string){
+ await hibernatingTabs.get(id);
+ if(sessions.has(id)){touchSession(sessions.get(id)!);return {ok:true as const};}
+ const saved=dormantTabs.get(id);if(!saved)return {ok:false as const,error:'Browser tab is no longer available.'};
+ let pending=wakingTabs.get(id);if(!pending){pending=openBrowserSession({ownerTaskId:saved.ownerTaskId,href:saved.url,sessionId:id,restore:true,waitUntil:'domcontentloaded',navTimeoutMs:20000,postWaitMs:0,includeConsole:false,includeSnapshot:false});wakingTabs.set(id,pending);}
+ try{const result=await pending;if(result.ok){const session=sessions.get(id)!;session.paused=saved.paused;dormantTabs.delete(id);}else dormantTabs.set(id,saved);persistBrowserTabs();return result;}finally{if(wakingTabs.get(id)===pending)wakingTabs.delete(id);}
 }
 
 function countSessionsForTask(taskId: string): number {
@@ -535,6 +691,7 @@ function countSessionsForTask(taskId: string): number {
   for (const s of sessions.values()) {
     if (s.ownerTaskId === taskId) n++;
   }
+  for(const tab of dormantTabs.values())if(tab.ownerTaskId===taskId&&!sessions.has(tab.sessionId))n++;
   return n;
 }
 
@@ -797,206 +954,150 @@ async function buildStealthContext(
   return context;
 }
 
-type DomSnapshotItem = { role: string; name: string; selector: string };
+type DomSnapshotItem = { role: string; name: string; selector: string; state: string; href?: string };
+let snapshotRefCounter = 0;
+const domRefNamespace = "__liminal_refs_" + randomUUID().replaceAll("-", "");
+const frameNodeRefs = new WeakMap<Frame, Map<string,string>>();
 
-function walkA11yInteractive(
-  node: A11yNode,
-  refs: Map<string, SnapshotRef>,
-  refLines: string[],
-  nextRef: () => string,
-  depth: number
-): void {
-  if (depth > 24) return;
-  const role = (node.role ?? "").toLowerCase();
-  const name = (node.name ?? node.value ?? "").trim();
-  if (role && name && INTERACTIVE_ROLES.has(role)) {
-    const id = nextRef();
-    refs.set(id, { role, name, exact: true });
-    refLines.push(`  ${id} ${role} "${name.replace(/"/g, "'")}"`);
-  }
-  for (const child of node.children ?? []) {
-    walkA11yInteractive(child, refs, refLines, nextRef, depth + 1);
-  }
-}
-
-async function buildDomSnapshotRefs(page: Page, maxItems = 48): Promise<DomSnapshotItem[]> {
-  return page.evaluate((limit) => {
-    const INTERACTIVE = new Set([
-      "button",
-      "link",
-      "textbox",
-      "checkbox",
-      "radio",
-      "combobox",
-      "searchbox",
-      "tab",
-      "switch",
-    ]);
-
-    function visible(el: Element): boolean {
-      const st = window.getComputedStyle(el);
-      if (st.display === "none" || st.visibility === "hidden" || st.opacity === "0") return false;
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    }
-
-    function accName(el: Element): string {
-      const a =
-        el.getAttribute("aria-label")?.trim() ||
-        (el as HTMLElement).innerText?.trim().slice(0, 120) ||
-        el.textContent?.trim().replace(/\s+/g, " ").slice(0, 120) ||
-        el.getAttribute("placeholder")?.trim() ||
-        el.getAttribute("title")?.trim() ||
-        el.getAttribute("name")?.trim() ||
-        el.getAttribute("value")?.trim() ||
-        "";
-      return a.replace(/\s+/g, " ");
-    }
-
-    function inferRole(el: Element): string {
-      const explicit = el.getAttribute("role")?.toLowerCase();
-      if (explicit) return explicit;
-      const tag = el.tagName.toLowerCase();
-      if (tag === "button") return "button";
-      if (tag === "a") return "link";
-      if (tag === "textarea") return "textbox";
-      if (tag === "select") return "combobox";
-      if (tag === "input") {
-        const t = (el as HTMLInputElement).type?.toLowerCase() ?? "text";
-        if (t === "checkbox") return "checkbox";
-        if (t === "radio") return "radio";
-        if (t === "search") return "searchbox";
-        return "textbox";
+async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promise<{items:DomSnapshotItem[];readable:string;context:string;contextSelector:string}> {
+  return target.evaluate(({limit,token,namespace})=>{
+    const state=window as unknown as Record<string,WeakMap<Element,string>>;
+    if(!state[namespace])Object.defineProperty(state,namespace,{value:new WeakMap<Element,string>()});
+    const identities=state[namespace]!;
+    const visible=(el:Element):boolean=>{
+      if(!el.getClientRects().length) return false;
+      let current:Element|null=el;
+      while(current){
+        if(current.matches('[hidden],[inert],[aria-hidden="true"]'))return false;
+        const style=getComputedStyle(current);
+        // Styled native checkboxes/radios are often transparent overlays. They
+        // remain real hit targets and expose state through accessibility.
+        if(style.display==='none'||style.visibility==='hidden'||style.opacity==='0'&&!(current===el&&el instanceof HTMLInputElement&&['checkbox','radio'].includes(el.type)))return false;
+        current=current.parentElement??(current.getRootNode() instanceof ShadowRoot ? (current.getRootNode() as ShadowRoot).host:null);
       }
-      return "button";
+      return true;
+    };
+    const modal=[...document.querySelectorAll('dialog[open],[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]')].filter(visible).at(-1);
+    const root=modal??document.body;
+    root.setAttribute("data-liminal-context",token);
+    const selector='a[href],button,input,textarea,select,[role="button"],[role="link"],[role="textbox"],[role="searchbox"],[role="combobox"],[role="option"],[role="listbox"],[role="checkbox"],[role="radio"],[role="tab"],[role="switch"],[contenteditable="true"],label,[ondblclick]';
+    const nodes:Element[]=[];
+    const collect=(scope:Element|ShadowRoot)=>{
+      nodes.push(...scope.querySelectorAll(selector));
+      for(const el of scope.querySelectorAll('*'))if(el.shadowRoot)collect(el.shadowRoot);
+    };
+    collect(root);
+    // Form/main controls must not disappear behind dozens of navigation links.
+    const priority=(el:Element)=>el.closest('form,main,[role="main"],[role="dialog"],dialog')||el.matches('input,textarea,select,[contenteditable="true"]')?0:el.closest('nav,header,footer,[role="navigation"]')?2:1;
+    nodes.sort((a,b)=>priority(a)-priority(b));
+    const items:DomSnapshotItem[]=[];
+    for(const el of nodes){
+      if(!visible(el))continue;
+      if(el instanceof HTMLLabelElement && (el.control || el.querySelector('input,textarea,select,[contenteditable="true"]')))continue;
+      const tag=el.tagName.toLowerCase();
+      const input=el instanceof HTMLInputElement?el:null;
+      if(input?.type==='hidden')continue;
+      const control=el instanceof HTMLInputElement||el instanceof HTMLSelectElement||el instanceof HTMLTextAreaElement?el:null;
+      const labelled=el.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>(el.getRootNode() as Document|ShadowRoot).getElementById(id)?.textContent?.trim()||'').join(' ').trim();
+      const labels=control?[...(control.labels??[])].map(label=>{const copy=label.cloneNode(true) as HTMLElement;copy.querySelectorAll('input,select,textarea,[contenteditable]').forEach(child=>child.remove());return copy.textContent?.trim()||'';}).join(' '):'';
+      const name=(el.getAttribute('aria-label')?.trim()||labelled||labels||el.getAttribute('placeholder')||el.getAttribute('title')||((el as HTMLElement).isContentEditable?'':(el as HTMLElement).innerText?.trim())||el.getAttribute('name')||el.id||'Unlabelled control').replace(/\s+/g,' ').slice(0,160);
+      const role=el.getAttribute('role')|| (tag==='select'?'combobox':tag==='textarea'||(el as HTMLElement).isContentEditable?'textbox':input?['checkbox','radio'].includes(input.type)?input.type:input.type==='search'?'searchbox':['submit','button','reset'].includes(input.type)?'button':'textbox':tag==='a'?'link':tag==='label'?'text':'button');
+      const state:string[]=[];
+      if(el.matches(':focus'))state.push('focused=true');
+      const row=el.closest('li,tr,[role="row"],[role="listitem"]');
+      if(row&&row!==el){const context=(row as HTMLElement).innerText?.replace(/\s+/g,' ').trim().slice(0,220);if(context)state.push('row='+JSON.stringify(context));}
+      if(el.matches(':disabled')||el.getAttribute('aria-disabled')==='true')state.push('disabled');
+      if(control?.required||el.getAttribute('aria-required')==='true')state.push('required');
+      if((el as HTMLElement).isContentEditable||input&&role==='combobox'&&!input.readOnly)state.push('editable');
+      if((input?.readOnly)||(el instanceof HTMLTextAreaElement&&el.readOnly))state.push('readonly');
+      if(input?.type==='password')state.push(input.value?'password=filled':'password=empty');
+      else if(control&&!(el instanceof HTMLSelectElement)&&control.value)state.push('value='+JSON.stringify(control.value.slice(0,180)));
+      else if((el as HTMLElement).isContentEditable&&(el as HTMLElement).innerText)state.push('value='+JSON.stringify((el as HTMLElement).innerText.slice(0,180)));
+      if(input&&['checkbox','radio'].includes(input.type))state.push('checked='+input.checked);
+      for(const key of ['expanded','selected','checked','invalid']){const value=el.getAttribute('aria-'+key);if(value!==null)state.push(key+'='+value);}
+      if(el instanceof HTMLSelectElement){state.push('selected='+JSON.stringify([...el.selectedOptions].map(o=>o.label).join(', ')));state.push('options='+JSON.stringify([...el.options].slice(0,16).map(o=>o.label)));}
+      else if(el.getAttribute('aria-valuetext'))state.push('value='+JSON.stringify(el.getAttribute('aria-valuetext')));
+      if(control&&!control.validity.valid&&control.validationMessage)state.push('validation='+JSON.stringify(control.validationMessage.slice(0,180)));
+      const described=el.getAttribute('aria-describedby')?.split(/\s+/).map(id=>(el.getRootNode() as Document|ShadowRoot).getElementById(id)?.textContent?.trim()||'').filter(Boolean).join(' ');
+      if(described)state.push('description='+JSON.stringify(described.slice(0,240)));
+      const marker=identities.get(el)??token+'-'+(items.length+1);identities.set(el,marker);el.setAttribute('data-liminal-ref',marker);
+      items.push({role,name,selector:'[data-liminal-ref="'+marker+'"]',state:state.join(' '),...(el instanceof HTMLAnchorElement&&/^https?:/.test(el.href)?{href:el.href}:{})});
+      if(items.length>=limit)break;
     }
-
-    function cssPath(el: Element): string {
-      const id = el.getAttribute("id");
-      if (id && /^[a-zA-Z][\w-]*$/.test(id)) return `#${id}`;
-      const testId = el.getAttribute("data-testid");
-      if (testId) return `[data-testid="${testId.replace(/"/g, '\\"')}"]`;
-      const name = el.getAttribute("name");
-      if (name && el.tagName.toLowerCase() === "input") {
-        return `input[name="${name.replace(/"/g, '\\"')}"]`;
-      }
-      const parts: string[] = [];
-      let cur: Element | null = el;
-      while (cur && cur.nodeType === 1 && parts.length < 5) {
-        let part = cur.tagName.toLowerCase();
-        if (cur.parentElement) {
-          const sibs = [...cur.parentElement.children].filter((c) => c.tagName === cur!.tagName);
-          if (sibs.length > 1) {
-            part += `:nth-of-type(${sibs.indexOf(cur) + 1})`;
-          }
-        }
-        parts.unshift(part);
-        cur = cur.parentElement;
-      }
-      return parts.join(" > ");
-    }
-
-    const nodes = document.querySelectorAll(
-      'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="textbox"], [role="searchbox"], [role="combobox"], [contenteditable="true"]'
-    );
-    const out: DomSnapshotItem[] = [];
-    const seen = new Set<string>();
-    for (const el of nodes) {
-      if (!visible(el)) continue;
-      const role = inferRole(el);
-      if (!INTERACTIVE.has(role)) continue;
-      const name = accName(el);
-      if (!name || name.length < 1) continue;
-      const selector = cssPath(el);
-      const key = `${role}|${name}|${selector}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ role, name: name.slice(0, 200), selector });
-      if (out.length >= limit) break;
-    }
-    return out;
-  }, maxItems);
+    const feedback=[...root.querySelectorAll('[role="alert"],[role="status"],[aria-live]')].filter(visible).map(el=>(el as HTMLElement).innerText?.trim()).filter(Boolean).join(' | ').slice(0,1000);
+    const content=(modal??[...document.querySelectorAll('main,[role="main"]')].find(visible)??root) as HTMLElement;
+    const articles=[...content.querySelectorAll('article')].filter(visible);
+    const readingRoot=(articles.length===1?articles[0]:content) as HTMLElement;
+    const readable=(readingRoot.innerText??'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+    const canvas=[...root.querySelectorAll('canvas')].filter(visible).length;
+    const unlabeledImages=[...root.querySelectorAll('img')].filter(el=>visible(el)&&!el.alt).length;
+    const timestamps=[...root.querySelectorAll('time[datetime],relative-time[datetime],local-time[datetime]')].filter(visible).slice(0,24).map(el=>({text:(el as HTMLElement).innerText?.trim(),datetime:el.getAttribute('datetime'),context:el.parentElement?.innerText?.replace(/\s+/g,' ').slice(0,180)}));
+    const searchPage=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
+    const reading={page_kind:searchPage?'search_results':articles.length>1?'listing':articles.length===1?'article':'page',rendered_chars:readable.length,excerpt_chars:Math.min(readable.length,5000),truncated:readable.length>5000};
+    return {items,readable:readable.slice(0,5000)+(readable.length>5000?'\n…(readable excerpt truncated; use browser_extract for the needed section)':''),contextSelector:'[data-liminal-context="'+token+'"]',context:JSON.stringify({focus:modal?'dialog':'page',reading,text:content.innerText?.replace(/\s+/g,' ').trim().slice(0,300),...(feedback?{feedback}:{}),...(timestamps.length?{timestamps}:{}),...(canvas||unlabeledImages?{visual_content:{canvas,unlabeledImages,note:'Use a screenshot for visual content that has no DOM text.'}}:{})})};
+  },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace});
 }
 
-async function tryLegacyA11ySnapshot(page: Page): Promise<A11yNode | null> {
-  const legacy = page as Page & {
-    accessibility?: { snapshot: (o: { interestingOnly: boolean }) => Promise<A11yNode | null> };
-  };
-  if (!legacy.accessibility?.snapshot) return null;
-  try {
-    return await legacy.accessibility.snapshot({ interestingOnly: true });
-  } catch {
-    return null;
-  }
-}
-
-async function tryAriaSnapshotYaml(page: Page): Promise<string | null> {
-  const loc = page.locator("body");
-  const withAria = loc as typeof loc & { ariaSnapshot?: () => Promise<string> };
-  if (typeof withAria.ariaSnapshot !== "function") return null;
-  try {
-    const yaml = await withAria.ariaSnapshot();
-    return yaml?.trim() ? yaml.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function buildPageSnapshot(
-  page: Page,
-  maxChars = 10_000
-): Promise<{ snapshotText: string; refs: Map<string, SnapshotRef> }> {
+export async function buildPageSnapshot(page:Page,maxChars=8_000):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
   assertPageWithinFileRoots(page);
-  const refs = new Map<string, SnapshotRef>();
-  const refLines: string[] = [];
-  let counter = 0;
-  const nextRef = () => {
-    counter += 1;
-    return `e${counter}`;
-  };
-
-  let treeBlock = "";
-  const snap = await tryLegacyA11ySnapshot(page);
-  if (snap) {
-    walkA11yInteractive(snap, refs, refLines, nextRef, 0);
-    treeBlock = JSON.stringify(snap, null, 0).slice(0, Math.max(2000, maxChars - 1200));
-  } else {
-    const ariaYaml = await tryAriaSnapshotYaml(page);
-    treeBlock = ariaYaml
-      ? ariaYaml.slice(0, Math.max(2000, maxChars - 1200))
-      : "(legacy accessibility API unavailable — using DOM snapshot)";
+  const refs=new Map<string,SnapshotRef>(), lines:string[]=[],contexts:string[]=[],readable:string[]=[],trees:string[]=[],passwords:string[]=[];
+  const nextRef=()=> 'e'+(++snapshotRefCounter);
+  let destinationBudget=1400;
+  const mainModal=await page.locator('dialog[open],[aria-modal="true"]').evaluateAll(elements=>elements.some(el=>el.getClientRects().length>0));
+  const frames=page.frames().slice(0,12);
+  for(const frame of frames){
+    if(frame!==page.mainFrame()){
+      const host=await frame.frameElement().catch(()=>null);
+      if(!host||!await host.isVisible().catch(()=>false))continue;
+      if(mainModal&&!await host.evaluate(el=>el instanceof Element && !!el.closest('dialog[open],[aria-modal="true"]')).catch(()=>false))continue;
+    }
+    try{
+      const dom=await buildDomSnapshotRefs(frame,48);
+      const frameLabel=frame===page.mainFrame()?'main':`frame ${new URL(frame.url()).origin}`;
+      contexts.push(`${frameLabel}: ${dom.context}`);
+      if(dom.readable)readable.push(`${frameLabel}:\n${dom.readable}`);
+      for(const item of dom.items){
+        let known=frameNodeRefs.get(frame);
+        if(!known){known=new Map();frameNodeRefs.set(frame,known);}
+        const id=known.get(item.selector)??nextRef();known.set(item.selector,id);
+        if(known.size>10000){known.clear();known.set(item.selector,id);}
+        refs.set(id,{role:item.role,name:item.name,exact:true,selector:item.selector,frame});
+        const destination=item.href&&item.href.length<=Math.min(300,destinationBudget)?' href='+JSON.stringify(item.href):'';
+        destinationBudget-=destination.length;
+        lines.push(`  ${id} ${item.role} ${JSON.stringify(item.name)}${item.state?' '+item.state:''}${destination}${frame===page.mainFrame()?'':' [embedded frame]'}`);
+      }
+      const activeRoot=frame.locator(dom.contextSelector);
+      const main=activeRoot.locator('main,[role="main"]').first();
+      const root=await main.count()?main:activeRoot;
+      const yaml=dom.readable?'':await root.ariaSnapshot().catch(()=>'');
+      if(yaml)trees.push(`${frameLabel}:\n${yaml.slice(0,4500)}`);
+      passwords.push(...await frame.locator('input[type="password"]').evaluateAll(elements=>elements.map(el=>(el as HTMLInputElement).value).filter(Boolean)));
+    }catch(err){contexts.push(`frame observation unavailable: ${err instanceof Error?err.name:'error'}`);}
   }
-
-  const domItems = await buildDomSnapshotRefs(page).catch(() => [] as DomSnapshotItem[]);
-  for (const item of domItems) {
-    const id = nextRef();
-    refs.set(id, {
-      role: item.role,
-      name: item.name,
-      exact: false,
-      selector: item.selector,
-    });
-    const selHint = item.selector.length > 60 ? `${item.selector.slice(0, 57)}…` : item.selector;
-    const comboboxHint = item.role === "combobox" ? " (use type_ref + press_key Enter)" : "";
-    refLines.push(
-      `  ${id} ${item.role} "${item.name.replace(/"/g, "'")}" sel=${selHint}${comboboxHint}`
-    );
-  }
-
-  const lines = [
-    "SNAPSHOT_REFS (use click_ref / fill_ref / hover_ref, or click_selector with sel=):",
-    ...(refLines.length ? refLines : ["  (no interactive refs — try wait_ms, scroll, or click_selector)"]),
-    "",
-    "A11Y_TREE_EXCERPT:",
-    treeBlock,
-  ];
-  let text = lines.join("\n");
-  if (text.length > maxChars) text = text.slice(0, maxChars) + "\n…(snapshot truncated)";
-  return { snapshotText: text, refs };
+  const observedAt=await page.evaluate(()=>({iso:new Date().toISOString(),local:new Date().toString(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}));
+  let text=formatBrowserSnapshot({observedAt,contexts,controls:lines,readable:readable.join('\n'),tree:trees.join('\n')},maxChars);
+  for(const password of passwords)text=text.replaceAll(password,'[REDACTED_PASSWORD]');
+  return {snapshotText:text,refs};
 }
 
 function touchSession(s: BrowserSession): void {
   s.lastUsedAt = Date.now();
+}
+
+export async function navigateWithRenderedContent(page:Page, href:string, options:{waitUntil:WaitUntilNav;timeout:number}):Promise<string|undefined>{
+  try {await page.goto(href,options);return undefined;}
+  catch(error){
+    if(!(error instanceof Error)||!/timeout/i.test(error.message))throw error;
+    const current=page.url();
+    const expected=new URL(href),observed=new URL(current);
+    const sameSource=expected.origin===observed.origin&&expected.pathname===observed.pathname;
+    const readable=sameSource&&await page.evaluate(()=>{
+      const main=document.querySelector('article,main,[role="main"]') as HTMLElement|null;
+      return document.readyState!=='loading'&&!!document.title.trim()&&!!main&&main.innerText.trim().length>400;
+    }).catch(()=>false);
+    if(!readable)throw error;
+    return `Requested ${options.waitUntil} did not finish within ${options.timeout}ms. Showing the rendered source document; some resources may still be loading.`;
+  }
 }
 
 export async function openBrowserSession(options: {
@@ -1010,9 +1111,14 @@ export async function openBrowserSession(options: {
   includeConsole: boolean;
   includeSnapshot: boolean;
   screenshot?: boolean;
+  sessionId?: string;
+  restore?: boolean;
 }): Promise<{ ok: true; sessionId: string; output: string } | { ok: false; error: string }> {
-  evictStaleSessions();
-  if (countSessionsForTask(options.ownerTaskId) >= maxSessionsPerTask()) {
+  startBrowserIdleCleanup();
+  const openingCount = [...openingTabs.values()].reduce((sum, count) => sum + count, 0);
+  if (!options.restore&&sessions.size+dormantTabs.size + openingCount >= 24) return { ok: false, error: "Browser tab limit (24) reached. Close an unused tab first." };
+  const openingForTask = openingTabs.get(options.ownerTaskId) ?? 0;
+  if (!options.restore&&options.ownerTaskId !== "user" && countSessionsForTask(options.ownerTaskId) + openingForTask >= maxSessionsPerTask()) {
     const openIds = [...sessions.entries()]
       .filter(([, s]) => s.ownerTaskId === options.ownerTaskId)
       .map(([id]) => id);
@@ -1025,26 +1131,37 @@ export async function openBrowserSession(options: {
   }
 
   let createdSessionId: string | undefined;
+  let lease: Awaited<ReturnType<typeof acquireBrowserPage>> | undefined;
+  let cancelled = false;
+  let kept = false;
+  const sessionId = options.sessionId ?? randomUUID();
+  const capacityError=await reserveBrowserSlot(options.ownerTaskId);if(capacityError)return {ok:false,error:capacityError};
   try {
-    return await withOwnedBrowser(async (browser, signal) => {
-    const context = await buildStealthContext(browser, options.viewport, options.userAgent);
-    const page = await context.newPage();
+    return await withBrowserWall(async () => {
+    lease = await acquireBrowserPage(sessionId, { headed: effectiveHarnessEnvRaw("AGENT_BROWSER_HEADED") === "1",
+      viewport: options.viewport, userAgent: options.userAgent });
+    const { browser, context, page, backend } = lease;
+    if (cancelled) { await releaseBrowserPage(sessionId, page, backend); throw new Error("Browser open cancelled"); }
     page.setDefaultTimeout(Math.min(30_000, options.navTimeoutMs));
     page.setDefaultNavigationTimeout(options.navTimeoutMs);
+    await page.addInitScript(()=>{document.addEventListener('input',event=>{if((event.target as HTMLElement)?.isContentEditable)(window as unknown as Record<string,unknown>).__liminalUnsavedEdits=true;},true);});
 
     const diagnostics: DiagnosticBuffers = { consoleMsgs: [], pageErrors: [], failedReqs: [] };
     attachDiagnostics(page, diagnostics);
 
-    await page.goto(options.href, {
+    let restoreUrl: string | undefined;
+    const navigationWarning=await navigateWithRenderedContent(page,options.href, {
       waitUntil: options.waitUntil,
       timeout: options.navTimeoutMs,
+    }).catch(error => {
+      if (!options.restore || page.isClosed()) throw error;
+      restoreUrl = options.href; // Keep an offline tab/address instead of silently losing it.
     });
     if (options.postWaitMs > 0) {
       await new Promise<void>((r) => setTimeout(r, options.postWaitMs));
     }
-    signal.throwIfAborted();
+    if (cancelled) throw new Error("Browser open cancelled");
 
-    const sessionId = randomUUID();
     assertPageWithinFileRoots(page);
     createdSessionId = sessionId;
     const session: BrowserSession = {
@@ -1053,13 +1170,18 @@ export async function openBrowserSession(options: {
       browser,
       context,
       page,
-      currentUrl: page.url(),
+      currentUrl: restoreUrl ?? page.url(),
+      restoreUrl,
       refs: new Map(),
       diagnostics,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
+      backend,
     };
     sessions.set(sessionId, session);
+    dormantTabs.delete(sessionId);
+    if (!options.restore) selectedTaskTabs.set(options.ownerTaskId, sessionId);
+    attachSessionLifecycle(session);
 
     const title = await page.title();
     const body = (await page.innerText("body").catch(() => ""))
@@ -1070,7 +1192,7 @@ export async function openBrowserSession(options: {
     if (options.includeSnapshot) {
       const { snapshotText, refs } = await buildPageSnapshot(page);
       session.refs = refs;
-      snapshotBlock = `\n${snapshotText}\n`;
+      snapshotBlock = `\n${observationFor(session,snapshotText)}\n`;
     }
 
     if (options.screenshot) {
@@ -1089,15 +1211,16 @@ export async function openBrowserSession(options: {
     const captchaHint = captcha ? formatCaptchaHint(captcha) : "";
 
     const output =
-      `SESSION_ID: ${sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\nBODY_EXCERPT:\n${body}` +
+      `SESSION_ID: ${sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}${navigationWarning?'\nNAVIGATION_WARNING: '+navigationWarning:''}${options.includeSnapshot?"":"\nBODY_EXCERPT:\n"+body}` +
       snapshotBlock +
       captchaHint +
       shotLine +
       diag;
 
-    signal.throwIfAborted();
+    if (cancelled) throw new Error("Browser open cancelled");
     await publishBrowserView(session, true);
-    return { result: { ok: true as const, sessionId, output }, keepOpen: true };
+    kept = true;
+    return { ok: true as const, sessionId, output };
     });
   } catch (err) {
     if (createdSessionId) {
@@ -1108,6 +1231,11 @@ export async function openBrowserSession(options: {
       ok: false,
       error: playwrightInstallHint(err instanceof Error ? err.message : String(err)),
     };
+  } finally {
+    cancelled = true;
+    const remaining = (openingTabs.get(options.ownerTaskId) ?? 1) - 1;
+    if (remaining > 0) openingTabs.set(options.ownerTaskId, remaining); else openingTabs.delete(options.ownerTaskId);
+    if (!kept && lease) await releaseBrowserPage(sessionId, lease.page, lease.backend).catch(() => undefined);
   }
 }
 
@@ -1130,7 +1258,7 @@ export async function snapshotBrowserSession(
     await publishBrowserView(session, true);
     return {
       ok: true,
-      output: `SESSION_ID: ${sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\n${snapshotText}${captchaHint}${diag}`,
+      output: `SESSION_ID: ${sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\n${observationFor(session,snapshotText,true)}${captchaHint}${diag}`,
     };
     });
   } catch (err) {
@@ -1150,12 +1278,13 @@ export async function navigateBrowserSession(options: {
 }): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const session = sessions.get(options.sessionId);
   if (!session) return { ok: false, error: `Unknown session_id: ${options.sessionId}` };
+  if (session.paused) return { ok: false, error: "User takeover is active. Wait for the user to resume agent control of this tab." };
   const resolved = resolveBrowseHref(options.href);
   if (!resolved.ok) return { ok: false, error: resolved.error };
   touchSession(session);
   try {
     return await withBrowserWall(async () => {
-      await session.page.goto(resolved.href, {
+      const navigationWarning=await navigateWithRenderedContent(session.page,resolved.href, {
         waitUntil: options.waitUntil,
         timeout: options.navTimeoutMs,
       });
@@ -1182,7 +1311,7 @@ export async function navigateBrowserSession(options: {
       return {
         ok: true,
         output:
-          `SESSION_ID: ${options.sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}\nBODY_EXCERPT:\n${body}\n${snapshotText}${shotLine}${diag}`,
+          `SESSION_ID: ${options.sessionId}\nURL: ${session.currentUrl}\nTITLE: ${title}${navigationWarning?'\nNAVIGATION_WARNING: '+navigationWarning:''}\n${observationFor(session,snapshotText)}${shotLine}${diag}`,
       };
     });
   } catch (err) {
@@ -1190,7 +1319,7 @@ export async function navigateBrowserSession(options: {
   }
 }
 
-/** User-driven navigation from the native WebView embed (keeps Playwright in sync). */
+/** User navigation acts on the same page as agent tools, without mirroring. */
 export async function userNavigateBrowserSession(options: {
   sessionId: string;
   href: string;
@@ -1212,6 +1341,7 @@ export async function userNavigateBrowserSession(options: {
       session.currentUrl = session.page.url();
       const { refs } = await buildPageSnapshot(session.page);
       session.refs = refs;
+      await publishBrowserView(session, true);
       return { ok: true, url: session.currentUrl };
     });
   } catch (err) {
@@ -1223,12 +1353,37 @@ function resolveRefLocator(page: Page, ref: string, refs: Map<string, SnapshotRe
   const meta = refs.get(ref);
   if (!meta) throw new Error(`Unknown ref "${ref}" — call browser_snapshot or browser_open with snapshot first.`);
   if (meta.selector) {
-    return page.locator(meta.selector).first();
+    if (meta.frame?.isDetached()) throw new Error(`Stale frame ref "${ref}" — call browser_snapshot.`);
+    return (meta.frame ?? page).locator(meta.selector).first();
   }
-  return page.getByRole(meta.role as Parameters<Page["getByRole"]>[0], {
+  return (meta.frame ?? page).getByRole(meta.role as Parameters<Page["getByRole"]>[0], {
     name: meta.name,
     exact: meta.exact ?? true,
   });
+}
+
+async function selectBrowserOption(page:Page|Frame,locator:Locator,value:string,timeoutMs=15000):Promise<void>{
+  const options=await locator.evaluate(el=>el instanceof HTMLSelectElement?[...el.options].map(o=>({value:o.value,label:o.label})):null,undefined,{timeout:timeoutMs});
+  if(options){const option=options.find(o=>o.value===value)??options.find(o=>o.label===value);if(!option)throw new Error('Option not found. Available labels: '+options.map(o=>o.label).join(', '));await locator.selectOption(option.value,{timeout:timeoutMs});return;}
+  const editable=await locator.evaluate(el=>el instanceof HTMLInputElement&&!el.readOnly||(el as HTMLElement).isContentEditable,undefined,{timeout:timeoutMs});
+  if(editable)await locator.fill(value,{timeout:timeoutMs});else await locator.click({timeout:timeoutMs});
+  const controls=(await locator.getAttribute('aria-controls')??await locator.getAttribute('aria-owns'))?.trim().split(/\s+/)[0];
+  const scope=controls?page.locator(`[id=${JSON.stringify(controls)}]`):page;
+  const byValue=scope.locator(`[role="option"][data-value=${JSON.stringify(value)}]:visible`).first();
+  const option=await byValue.isVisible()?byValue:scope.getByRole('option',{name:value,exact:true}).first();
+  await option.click({timeout:timeoutMs});
+}
+
+async function resolveBrowserSelector(page:Page,selector:string):Promise<{target:Page|Frame;locator:Locator}>{
+  const main=page.locator(selector);if(await main.count())return {target:page,locator:main};
+  const candidates:{target:Frame;locator:Locator}[]=[];
+  for(const frame of page.frames()){
+    if(frame===page.mainFrame())continue;const host=await frame.frameElement().catch(()=>null);
+    if(!host||!await host.isVisible().catch(()=>false))continue;
+    const locator=frame.locator(selector);if(await locator.count())candidates.push({target:frame,locator});
+  }
+  if(candidates.length>1)throw new Error('Selector matches multiple embedded frames. Use the intended control snapshot ref.');
+  return candidates[0]??{target:page,locator:main};
 }
 
 export function clampTimeout(n: number, cap: number): number {
@@ -1331,6 +1486,7 @@ export function normalizeOneAction(
         op: px !== undefined ? { op: "scroll", direction: d, px } : { op: "scroll", direction: d },
       };
     }
+    case "reload": return {op:{op:"reload",wait_until:o["wait_until"]==="load"?"load":"domcontentloaded",timeout_ms:clampTimeout(Number(o["timeout_ms"]??15000),60000)}};
     case "goto": {
       const url = String(o["url"] ?? "").trim();
       if (!url) return { error: "goto: url required" };
@@ -1384,24 +1540,28 @@ export function normalizeOneAction(
         },
       };
     }
+    case "double_click_text":
     case "click_text": {
       const text = shorten(String(o["text"] ?? "").trim(), 400);
       if (!text) return { error: "click_text: text required" };
       return {
         op: {
-          op: "click_text",
+          op: op as "click_text" | "double_click_text",
           text,
           exact: Boolean(o["exact"]),
           timeout_ms: clampTimeout(Number(o["timeout_ms"] ?? 15_000), 45_000),
         },
       };
     }
+    case "check_ref":
+    case "uncheck_ref":
+    case "double_click_ref":
     case "click_ref": {
       const ref = shorten(String(o["ref"] ?? "").trim(), 16);
       if (!/^e\d+$/.test(ref)) return { error: "click_ref: ref like e1 from SNAPSHOT_REFS" };
       return {
         op: {
-          op: "click_ref",
+          op: op as "click_ref" | "double_click_ref" | "check_ref" | "uncheck_ref",
           ref,
           timeout_ms: clampTimeout(Number(o["timeout_ms"] ?? 15_000), 45_000),
         },
@@ -1541,6 +1701,11 @@ export function normalizeOneAction(
         },
       };
     }
+    case "select_option_ref": {
+      const ref = String(o["ref"] ?? "").trim();
+      if (!/^e\d+$/.test(ref)) return { error: 'select_option_ref: ref like e1, and value matching an option label or value' };
+      return { op: { op: "select_option_ref", ref, value: String(o["value"] ?? ""), timeout_ms: clampTimeout(Number(o["timeout_ms"] ?? 15_000), 45_000) } };
+    }
     case "check": {
       const selector = selectorField(o);
       if (typeof selector !== "string") return { error: `check: ${selector.error}` };
@@ -1571,6 +1736,48 @@ export function normalizeOneAction(
   }
 }
 
+/** Some news cards put a same-destination anchor above their labelled headline.
+ * Click that real hit target normally; never force through dialogs or other links. */
+export async function clickBrowserControl(target: Page | Frame, locator: Locator, timeoutMs = 15000): Promise<void> {
+  let count = await locator.count();
+  if (!count) {
+    await locator.waitFor({state:'attached',timeout:Math.min(timeoutMs,1500)}).catch(()=>{});
+    count = await locator.count();
+  }
+  if (count !== 1) {
+    const choices = await locator.evaluateAll(elements => elements.slice(0,6).map(el => ({
+      tag:el.tagName.toLowerCase(),name:(el.getAttribute('aria-label')||(el as HTMLElement).innerText||'').trim().slice(0,140),
+      href:el instanceof HTMLAnchorElement?el.href:undefined,visible:!!el.getClientRects().length,
+    })));
+    throw Error(count ? `AMBIGUOUS_TARGET: ${count} matches; no click executed. Choose the intended observed ref or destination. Candidates: ${JSON.stringify(choices)}` : 'TARGET_NOT_FOUND: no matching element appeared. No click executed; use the fresh refs or browser_extract links instead of guessing another selector.');
+  }
+  if (!await locator.isVisible()) {
+    await locator.waitFor({state:'visible',timeout:Math.min(timeoutMs,1500)}).catch(()=>{});
+    if (!await locator.isVisible()) throw Error('TARGET_NOT_VISIBLE: no click executed. Inspect the returned current controls; do not force the click.');
+  }
+  const isLink = await locator.evaluate(el => el instanceof HTMLAnchorElement && /^https?:/.test(el.href) && !el.hasAttribute('download'), undefined, {timeout: Math.min(timeoutMs, 2000)});
+  let actual = locator;
+  if (isLink) {
+    await locator.scrollIntoViewIfNeeded({timeout: Math.min(timeoutMs, 2000)});
+    const token = randomUUID();
+    const equivalent = await locator.evaluate((el, marker) => {
+      const link = el as HTMLAnchorElement, rect = link.getBoundingClientRect();
+      const x = Math.max(0, Math.min(innerWidth - 1, rect.x + rect.width / 2));
+      const y = Math.max(0, Math.min(innerHeight - 1, rect.y + rect.height / 2));
+      const hit = document.elementFromPoint(x, y)?.closest('a[href]');
+      if (!(hit instanceof HTMLAnchorElement) || hit === link || hit.href !== link.href || hit.target !== link.target || hit.hasAttribute('download')) return false;
+      if (hit.closest('dialog,[aria-modal="true"]') !== link.closest('dialog,[aria-modal="true"]')) return false;
+      hit.setAttribute('data-liminal-click-target', marker); return true;
+    }, token, {timeout: Math.min(timeoutMs, 2000)});
+    if (equivalent) actual = target.locator(`[data-liminal-click-target="${token}"]`);
+  }
+  await actual.click({timeout: timeoutMs});
+}
+
+class BrowserActionError extends Error {
+  constructor(message:string,readonly completedSteps:number,readonly failedStep:number,readonly op:string){super(message);}
+}
+
 export async function runBrowserActions(
   session: BrowserSession,
   ops: BrowserActOp[]
@@ -1581,12 +1788,17 @@ export async function runBrowserActions(
   const navTimeoutDefault = parseHarnessMs("AGENT_BROWSER_NAV_TIMEOUT_MS", 45_000, 120_000);
 
   for (let i = 0; i < ops.length; i++) {
+    if (session.paused) throw new Error("User takeover is active. Resume agent control before continuing.");
     const a = ops[i]!;
     const label = `#${i + 1}:${a.op}`;
     assertPageWithinFileRoots(page);
     const urlBefore = page.url();
     try {
       switch (a.op) {
+        case "reload":
+          await page.reload({waitUntil:a.wait_until??"domcontentloaded",timeout:a.timeout_ms??15000});
+          urlChanged=true;
+          break;
         case "goto": {
           const resolved = resolveBrowseHref(a.url);
           if (!resolved.ok) throw new Error(resolved.error);
@@ -1622,7 +1834,7 @@ export async function runBrowserActions(
           });
           break;
         case "click_selector":
-          await page.locator(a.selector).click({ timeout: a.timeout_ms ?? 15_000 });
+          { const found=await resolveBrowserSelector(page,a.selector); await clickBrowserControl(found.target,found.locator,a.timeout_ms??15000); }
           break;
         case "click_role": {
           const loc = a.exact
@@ -1630,21 +1842,27 @@ export async function runBrowserActions(
             : page.getByRole(a.role as "button", {
                 name: new RegExp(escapeRegex(a.name), "i"),
               });
-          await loc.click({ timeout: a.timeout_ms ?? 15_000 });
+          await clickBrowserControl(page,loc,a.timeout_ms??15000);
           break;
         }
         case "click_text":
-          await page.getByText(a.text, { exact: Boolean(a.exact) }).click({
-            timeout: a.timeout_ms ?? 15_000,
-          });
+          await clickBrowserControl(page,page.getByText(a.text, { exact: Boolean(a.exact) }),a.timeout_ms??15000);
+          break;
+        case "double_click_ref":
+          await resolveRefLocator(page,a.ref,session.refs).dblclick({timeout:a.timeout_ms??15000});
+          break;
+        case "double_click_text":
+          await page.getByText(a.text,{exact:a.exact??true}).dblclick({timeout:a.timeout_ms??15000});
           break;
         case "click_ref":
-          await resolveRefLocator(page, a.ref, session.refs).click({
-            timeout: a.timeout_ms ?? 15_000,
-          });
+          await clickBrowserControl(session.refs.get(a.ref)?.frame??page,resolveRefLocator(page, a.ref, session.refs),a.timeout_ms??15000);
+          break;
+        case "check_ref":
+        case "uncheck_ref":
+          await resolveRefLocator(page,a.ref,session.refs).setChecked(a.op==='check_ref',{timeout:a.timeout_ms??15000});
           break;
         case "fill":
-          await page.locator(a.selector).fill(a.value, { timeout: a.timeout_ms ?? 15_000 });
+          await (await resolveBrowserSelector(page,a.selector)).locator.fill(a.value, { timeout: a.timeout_ms ?? 15_000 });
           break;
         case "fill_ref":
           await resolveRefLocator(page, a.ref, session.refs).fill(a.value, {
@@ -1677,7 +1895,7 @@ export async function runBrowserActions(
           break;
         }
         case "hover":
-          await page.locator(a.selector).hover({ timeout: a.timeout_ms ?? 15_000 });
+          await (await resolveBrowserSelector(page,a.selector)).locator.hover({ timeout: a.timeout_ms ?? 15_000 });
           break;
         case "hover_ref":
           await resolveRefLocator(page, a.ref, session.refs).hover({
@@ -1692,16 +1910,18 @@ export async function runBrowserActions(
             timeout: a.timeout_ms ?? 15_000,
           });
           break;
-        case "select_option":
-          await page.locator(a.selector).selectOption(a.value, {
-            timeout: a.timeout_ms ?? 15_000,
-          });
+        case "select_option": {
+          const found=await resolveBrowserSelector(page,a.selector);
+          await selectBrowserOption(found.target,found.locator,a.value,a.timeout_ms);break;
+        }
+        case "select_option_ref":
+            await selectBrowserOption(session.refs.get(a.ref)?.frame ?? page, resolveRefLocator(page, a.ref, session.refs), a.value, a.timeout_ms);
           break;
         case "check":
-          await page.locator(a.selector).check({ timeout: a.timeout_ms ?? 15_000 });
+          await (await resolveBrowserSelector(page,a.selector)).locator.check({ timeout: a.timeout_ms ?? 15_000 });
           break;
         case "uncheck":
-          await page.locator(a.selector).uncheck({ timeout: a.timeout_ms ?? 15_000 });
+          await (await resolveBrowserSelector(page,a.selector)).locator.uncheck({ timeout: a.timeout_ms ?? 15_000 });
           break;
         case "screenshot": {
           const shotPath = browserArtifactPath("shot");
@@ -1719,7 +1939,7 @@ export async function runBrowserActions(
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
-      throw new Error(`browser_act step ${label} failed: ${detail}`);
+      throw new BrowserActionError(`browser_act step ${label} failed: ${detail}`,i,i+1,a.op);
     }
     assertPageWithinFileRoots(page);
     if (page.url() !== urlBefore) urlChanged = true;
@@ -1742,9 +1962,11 @@ export async function actOnBrowserSession(options: {
   postActionWaitMs: number;
   refreshSnapshot: boolean;
   includeConsole: boolean;
+  compactObservation?: boolean;
 }): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const session = sessions.get(options.sessionId);
   if (!session) return { ok: false, error: `Unknown session_id: ${options.sessionId}` };
+  if (session.paused) return { ok: false, error: "User takeover is active. Wait for the user to resume agent control of this tab." };
   touchSession(session);
   try {
     return await withBrowserWall(async () => {
@@ -1754,15 +1976,12 @@ export async function actOnBrowserSession(options: {
       await new Promise<void>((r) => setTimeout(r, postWait));
     }
     assertPageWithinFileRoots(session.page);
-    const text = (await session.page.innerText("body").catch(() => ""))
-      .replace(/\s+/g, " ")
-      .slice(0, 8000);
     let extra = "";
     const needSnapshot = options.refreshSnapshot || urlChanged;
     if (needSnapshot) {
       const { snapshotText, refs } = await buildPageSnapshot(session.page);
       session.refs = refs;
-      extra = `\n${snapshotText}\n`;
+      extra = `\n${observationFor(session,snapshotText,!options.compactObservation)}\n`;
     }
     const diag = options.includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
     const shotLine = session.lastScreenshotPath
@@ -1772,11 +1991,20 @@ export async function actOnBrowserSession(options: {
     return {
       ok: true,
       output:
-        `SESSION_ID: ${options.sessionId}\nACTIONS_DONE: success\nURL: ${session.currentUrl}\nBODY_TEXT:\n${text}${extra}${shotLine}${diag}`,
+        `SESSION_ID: ${options.sessionId}\nACTIONS_EXECUTED: ${options.actions.length}\nURL: ${session.currentUrl}\n${extra || "OBSERVATION_NOT_REFRESHED: requested refresh_snapshot=false; use browser_snapshot when needed."}${shotLine}${diag}`,
     };
     });
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    let error=err instanceof Error?err.message:String(err);
+    if(err instanceof BrowserActionError){
+      session.currentUrl=session.page.url();
+      error+='\nACTION_PROGRESS: '+JSON.stringify({completed_steps:err.completedSteps,failed_step:err.failedStep,op:err.op,url:session.currentUrl});
+      if(!session.page.isClosed()){
+        const snapshot=await buildPageSnapshot(session.page).catch(()=>null);
+        if(snapshot){session.refs=snapshot.refs;error+='\n'+observationFor(session,snapshot.snapshotText,true);}
+      }
+    }
+    return {ok:false,error};
   }
 }
 
@@ -1835,11 +2063,12 @@ export function listBrowserSessionIdsForTask(taskId: string): string[] {
     .map(([id]) => id);
 }
 
-export async function closeAllBrowserSessionsForTask(taskId: string): Promise<number> {
-  const ids = listBrowserSessionIdsForTask(taskId);
+export async function closeAllBrowserSessionsForTask(taskId: string,options?:{includePaused?:boolean}): Promise<number> {
+  const ids = browserWorkspaceState(taskId).tabs.filter(tab=>options?.includePaused||!tab.paused).map(tab=>tab.sessionId);
   for (const id of ids) {
     await closeBrowserSession({ sessionId: id }).catch(() => undefined);
   }
+  if(options?.includePaused)busyBrowserTasks.delete(taskId);
   return ids.length;
 }
 
@@ -1847,7 +2076,12 @@ export async function closeBrowserSession(options: {
   sessionId: string;
   screenshot?: boolean;
 }): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
+  await hibernatingTabs.get(options.sessionId);
   const session = sessions.get(options.sessionId);
+  if(!session&&dormantTabs.has(options.sessionId)){
+    const owner=dormantTabs.get(options.sessionId)!.ownerTaskId;dormantTabs.delete(options.sessionId);visibleTabs.delete(options.sessionId);
+    if(selectedTaskTabs.get(owner)===options.sessionId)selectedTaskTabs.delete(owner);persistBrowserTabs();return {ok:true,output:`SESSION_CLOSED: ${options.sessionId}`};
+  }
   if (!session) return { ok: false, error: `Unknown session_id: ${options.sessionId}` };
   let shotLine = "";
   try {
@@ -1862,8 +2096,19 @@ export async function closeBrowserSession(options: {
   } finally {
     publishBrowserViewClosed(options.sessionId);
     sessions.delete(options.sessionId);
-    await session.context.close().catch(() => undefined);
-    await session.browser.close().catch(() => undefined);
+    visibleTabs.delete(options.sessionId);
+    dormantTabs.delete(options.sessionId);
+    if (selectedTaskTabs.get(session.ownerTaskId) === options.sessionId) {
+      const remaining = browserWorkspaceState(session.ownerTaskId).tabs.at(-1);
+      if (remaining) selectedTaskTabs.set(session.ownerTaskId, remaining.sessionId);
+      else selectedTaskTabs.delete(session.ownerTaskId);
+    }
+    persistBrowserTabs();
+    if (session.backend) await releaseBrowserPage(options.sessionId, session.page, session.backend).catch(() => undefined);
+    else {
+      await session.context.close().catch(() => undefined);
+      await session.browser.close().catch(() => undefined);
+    }
   }
   return { ok: true, output: `SESSION_CLOSED: ${options.sessionId}${shotLine}` };
 }
@@ -1936,14 +2181,120 @@ async function closeStaticServersForTask(taskId: string): Promise<void> {
 
 export function registerBrowserTurnCleanup(harness: {
   taskId: string;
+  getIsRunning?:()=>boolean;
   onTurnEndCleanup?: (taskId: string) => void | Promise<void>;
 }): void {
-  const prior = harness.onTurnEndCleanup;
-  harness.onTurnEndCleanup = (taskId) => {
-    void closeAllBrowserSessionsForTask(taskId);
-    void closeStaticServersForTask(taskId);
-    if (prior) return prior(taskId);
-  };
+  if(registeredBrowserHarnesses.has(harness))return;
+  registeredBrowserHarnesses.add(harness);
+  if(harness.getIsRunning){const ref=new WeakRef(harness),taskId=harness.taskId;busyBrowserTasks.set(taskId,()=>{const current=ref.deref();if(!current){busyBrowserTasks.delete(taskId);return false;}return current.getIsRunning?.()===true;});}
+  const previous=harness.onTurnEndCleanup;
+  harness.onTurnEndCleanup=async id=>{await previous?.(id);for(const session of sessions.values())if(session.ownerTaskId===id)touchSession(session);};
+}
+
+let restorePromise: Promise<void> | undefined;
+export function restoreBrowserWorkspace(): Promise<void> {
+  restorePromise ??= (async () => {
+    lockBrowserProfile();
+    restoring = true;
+    try {
+    const workspace = readBrowserWorkspace();
+    selectedTaskTabs.clear();
+    for (const [owner, id] of Object.entries(workspace.selectedTabs)) selectedTaskTabs.set(owner, id);
+    const saved = workspace.tabs.slice(0, 24);
+    for (const tab of saved) {
+      if (sessions.has(tab.sessionId) || !/^https?:\/\//.test(tab.url)) continue;
+      const resolved = resolveBrowseHref(tab.url);
+      if (!resolved.ok) continue;
+      // A restart is not a user takeover. Preserve the user's actual pause choice.
+      dormantTabs.set(tab.sessionId,{...tab,ownerTaskId:tab.ownerTaskId||'user',url:resolved.href});
+    }
+    } finally { restoring = false; }
+    startBrowserIdleCleanup();persistBrowserTabs();
+  })();
+  restorePromise.catch(() => { restorePromise = undefined; });
+  return restorePromise;
+}
+
+export async function controlBrowserWorkspace(action: string, sessionId?: string, url?: string, ownerTaskId?: string) {
+ return withBrowserTask(ownerTaskId??(sessions.get(sessionId??'')??dormantTabs.get(sessionId??''))?.ownerTaskId??'user',()=>controlBrowserWorkspaceImpl(action,sessionId,url,ownerTaskId));
+}
+async function controlBrowserWorkspaceImpl(action: string, sessionId?: string, url?: string, ownerTaskId?: string) {
+  const state = () => browserWorkspaceState(ownerTaskId);
+  if (action === "state") return { ok: true, ...state() };
+  if (action === "restore") {
+    await restoreBrowserWorkspace();
+    // Migrate unassigned tabs from older app versions once, through the user's
+    // explicit chat workspace. Agent tools never claim arbitrary user tabs.
+    if (ownerTaskId) {
+      const previousSelection = selectedTaskTabs.get("user");
+      for (const tab of sessions.values()) if (tab.ownerTaskId === "user") tab.ownerTaskId = ownerTaskId;
+      for (const tab of dormantTabs.values()) if (tab.ownerTaskId === "user") tab.ownerTaskId = ownerTaskId;
+      if (!selectedTaskTabs.has(ownerTaskId) && previousSelection && (sessions.get(previousSelection)??dormantTabs.get(previousSelection))?.ownerTaskId === ownerTaskId) {
+        selectedTaskTabs.set(ownerTaskId, previousSelection);
+      }
+      selectedTaskTabs.delete("user");
+      persistBrowserTabs();
+    }
+    return { ok: true, ...state() };
+  }
+  if (action === "open") {
+    const resolved = resolveBrowseHref(url || "https://www.google.com");
+    if (!resolved.ok) return resolved;
+    const result = await openBrowserSession({ ownerTaskId: ownerTaskId ?? "user", href: resolved.href, waitUntil: "domcontentloaded",
+      navTimeoutMs: 30_000, postWaitMs: 0, includeConsole: false, includeSnapshot: false });
+    return { ...result, ...state() };
+  }
+  if (action === "clear_history") {
+    lockBrowserProfile();
+    const fsPath = path.join(browserProfileRoot(), "workspace.json");
+    const data = readBrowserWorkspace(); data.history = [];
+    fs.mkdirSync(browserProfileRoot(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(fsPath, JSON.stringify(data), { mode: 0o600 });
+    return { ok: true, ...state() };
+  }
+  const record=sessions.get(sessionId??'')??dormantTabs.get(sessionId??'');
+  if(!record)return {ok:false,error:'Browser tab is no longer available'};
+  if(ownerTaskId&&record.ownerTaskId!==ownerTaskId)return {ok:false,error:'This browser tab belongs to another chat'};
+  if(action==='hide'){visibleTabs.delete(record.sessionId);return {ok:true};}
+  if(action==='close'){const result=await closeBrowserSession({sessionId:record.sessionId});return {...result,...state()};}
+  if(action==='show')visibleTabs.add(record.sessionId);
+  const restored=await ensureBrowserSessionActive(record.sessionId);if(!restored.ok){visibleTabs.delete(record.sessionId);return restored;}
+  const session=sessions.get(record.sessionId)!;
+  if (action === "navigate") {
+    const result = await userNavigateBrowserSession({ sessionId: session.sessionId, href: url || "" });
+    if (!result.ok) return result;
+  } else if (action === "pause" || action === "resume") {
+    session.paused = action === "pause";
+    await publishBrowserView(session, true);
+  } else if (action === "clear_site_data") {
+    const cdp = await session.context.newCDPSession(session.page);
+    try { await cdp.send("Storage.clearDataForOrigin", { origin: new URL(session.page.url()).origin, storageTypes: "all" }); }
+    finally { await cdp.detach(); }
+    await session.page.reload({ waitUntil: "domcontentloaded" });
+  } else if (action === "back") await session.page.goBack({ waitUntil: "domcontentloaded" });
+  else if (action === "forward") await session.page.goForward({ waitUntil: "domcontentloaded" });
+  else if (action === "reload") await session.page.reload({ waitUntil: "domcontentloaded" });
+  else if (action === "focus"||action==='show') {
+    selectBrowserTaskTab(session.ownerTaskId, session.sessionId);
+    await session.page.bringToFront();
+  }
+  else return { ok: false, error: "Unknown browser action" };
+  if (sessions.has(session.sessionId)) await publishBrowserView(session, true);
+  return { ok: true, ...state() };
+}
+
+export async function shutdownBrowserWorkspace(): Promise<void> {
+  if(idleTimer){clearInterval(idleTimer);idleTimer=undefined;}
+  persistBrowserTabs(); stopping = true;
+  try {
+    for (const s of sessions.values()) publishBrowserViewClosed(s.sessionId);
+    await shutdownBrowserProfile();
+    sessions.clear();
+    dormantTabs.clear();
+    visibleTabs.clear();busyBrowserTasks.clear();wakingTabs.clear();
+    for (const server of staticServers) server.server.close();
+    staticServers.length = 0;
+  } finally { stopping = false; restorePromise = undefined; }
 }
 
 // ─── CAPTCHA detection ────────────────────────────────────────────────────────
@@ -2153,65 +2504,105 @@ export async function extractFromSession(
   sessionId: string,
   type: ExtractType,
   selector?: string,
-  includeHidden = false
+  includeHidden = false,
+  query?: string,
+  readingWindow?: {offset?: number; maxChars?: number; includeSource?: boolean}
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const session = sessions.get(sessionId);
   if (!session) return { ok: false, error: `Unknown session_id: ${sessionId}` };
   touchSession(session);
   try {
     assertPageWithinFileRoots(session.page);
-    const result = await session.page.evaluate(
-      ({ ty, sel, hidden }: { ty: string; sel: string | undefined; hidden: boolean }) => {
+    if(type==='forms'){
+      const forms:Record<string,unknown>[]=[];
+      for(const frame of session.page.frames()){
+        if(frame!==session.page.mainFrame()){const host=await frame.frameElement().catch(()=>null);if(!host||!await host.isVisible().catch(()=>false))continue;}
+        const observed=await frame.evaluate(({hidden})=>{
+          const roots:(Document|ShadowRoot)[]=[document];
+          for(let i=0;i<roots.length;i++)for(const el of roots[i]!.querySelectorAll('*'))if(el.shadowRoot)roots.push(el.shadowRoot);
+          const controls=roots.flatMap(root=>[...root.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>('input,textarea,select')]).filter(el=>hidden||el.type!=='hidden'&&el.getClientRects().length>0&&!el.closest('[hidden],[inert],[aria-hidden="true"]'));
+          const groups=new Map<HTMLFormElement|null,typeof controls>();
+          for(const el of controls){const group=groups.get(el.form)??[];group.push(el);groups.set(el.form,group);}
+          return [...groups].map(([form,fields])=>({action:form?.action??null,method:form?.method??null,unowned:form===null,fields:fields.map(el=>({
+            tag:el.tagName.toLowerCase(),type:el.type,name:el.name||null,id:el.id||null,label:el.getAttribute('aria-label')||[...(el.labels??[])].map(label=>label.textContent?.trim()).join(' ')||null,
+            placeholder:el.getAttribute('placeholder'),value:el.type==='password'?null:el.value||null,password_filled:el.type==='password'?!!el.value:undefined,required:el.required,disabled:el.disabled,
+            checked:el instanceof HTMLInputElement&&['checkbox','radio'].includes(el.type)?el.checked:undefined,
+            options:el instanceof HTMLSelectElement?[...el.options].map(o=>({label:o.label,value:o.value,selected:o.selected})):undefined,validation:!el.validity.valid?el.validationMessage:null,
+          }))}));
+        },{hidden:includeHidden});
+        forms.push(...observed.map(form=>({...form,frame_origin:new URL(frame.url()).origin})));
+      }
+      return {ok:true,output:JSON.stringify(forms,null,2)};
+    }
+    const observed = await session.page.evaluate(
+      ({ ty, sel, hidden, query, sourced }: { ty: string; sel: string | undefined; hidden: boolean; query?:string;sourced:boolean }) => {
+        function extract() {
         function vis(el: Element): boolean {
           if (hidden) return true;
           const s = window.getComputedStyle(el);
-          return s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+          return el.getClientRects().length > 0 && !el.closest('[hidden],[inert],[aria-hidden="true"]') && s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
         }
         if (ty === "tables") {
           const tables = Array.from(document.querySelectorAll("table")).filter(vis);
           return tables.map((t) => {
-            const rows = Array.from(t.querySelectorAll("tr")).map((r) =>
-              Array.from(r.querySelectorAll("th,td")).map((c) => (c as HTMLElement).innerText.trim().replace(/\s+/g, " "))
+            const rows = Array.from(t.querySelectorAll("tr")).filter(vis).map((r) =>
+              Array.from(r.querySelectorAll("th,td")).filter(vis).map((c) => (c as HTMLElement).innerText.trim().replace(/\s+/g, " "))
             );
             const caption = t.querySelector("caption")?.textContent?.trim() ?? null;
             return { caption, rows };
           });
         }
         if (ty === "links") {
-          return Array.from(document.querySelectorAll("a[href]"))
+          return Array.from((sel?document.querySelector(sel):document)?.querySelectorAll("a[href]")??[])
             .filter(vis)
             .map((a) => ({
               text: (a as HTMLAnchorElement).innerText.trim().replace(/\s+/g, " ").slice(0, 200),
               href: (a as HTMLAnchorElement).href,
+              context: a.closest('p,li')?.textContent?.trim().replace(/\s+/g,' ').slice(0,240),
             }))
-            .filter((l) => l.text || l.href);
+            .filter((l) => (l.text || l.href)&&(!query?.trim()||[l.text,l.href,l.context].join(' ').toLowerCase().includes(query.trim().toLowerCase())));
         }
         if (ty === "text") {
-          const root = sel ? document.querySelector(sel) : document.body;
-          return (root as HTMLElement | null)?.innerText?.replace(/\s+/g, " ").trim().slice(0, 50_000) ?? "";
-        }
-        if (ty === "forms") {
-          return Array.from(document.querySelectorAll("form")).map((f) => ({
-            action: f.action || null,
-            method: f.method || "get",
-            fields: Array.from(f.querySelectorAll("input,textarea,select")).filter(vis).map((el) => {
-              const inp = el as HTMLInputElement;
-              return {
-                tag: el.tagName.toLowerCase(),
-                type: inp.type || null,
-                name: inp.name || null,
-                id: inp.id || null,
-                placeholder: inp.placeholder || null,
-                value: inp.value || null,
-                required: inp.required || false,
-              };
-            }),
-          }));
+          const root = sel ? document.querySelector(sel) : document.querySelector('article,main,[role="main"]')??document.body;
+          if(!root)return "";
+          const raw=(root as HTMLElement).innerText?.replace(/[^\S\r\n]+/g," ").trim()??"";
+          const headings=[...root.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"]')].filter(vis);
+          if(query?.trim()){
+            const needle=query.trim().toLowerCase();
+            const headingMatches=headings.filter(el=>(el as HTMLElement).innerText.toLowerCase().includes(needle));
+            const matches=(headingMatches.length?headingMatches:[...root.querySelectorAll('*')].filter(el=>vis(el)&&(el as HTMLElement).innerText?.toLowerCase().includes(needle)&&![...el.children].some(child=>(child as HTMLElement).innerText?.toLowerCase().includes(needle)))).slice(0,20);
+            if(!matches.length)return {matches:[],available_headings:headings.slice(0,30).map(h=>(h as HTMLElement).innerText.trim())};
+            return matches.map(el=>{
+              const hierarchy:{level:number;heading:string}[]=[];
+              for(const heading of headings){
+                if(!(heading.compareDocumentPosition(el)&Node.DOCUMENT_POSITION_FOLLOWING))continue;
+                const level=Number(heading.getAttribute('aria-level')??heading.tagName.slice(1))||2;
+                while(hierarchy.length&&hierarchy.at(-1)!.level>=level)hierarchy.pop();
+                hierarchy.push({level,heading:(heading as HTMLElement).innerText.trim()});
+              }
+              const local=(el.parentElement?.parentElement??el.parentElement??el) as HTMLElement;
+              if(headings.includes(el)){
+                const level=Number(el.getAttribute('aria-level')??el.tagName.slice(1))||2;
+                const next=headings.find(h=>(el.compareDocumentPosition(h)&Node.DOCUMENT_POSITION_FOLLOWING)&&Number(h.getAttribute('aria-level')??h.tagName.slice(1))<=level);
+                const range=document.createRange();range.setStartAfter(el);if(next)range.setEndBefore(next);else range.setEnd(root,root.childNodes.length);
+                const fragment=range.cloneContents();
+                return {headingPath:[...hierarchy.map(h=>h.heading),(el as HTMLElement).innerText.trim()],text:(el as HTMLElement).innerText.trim(),nearbyText:range.toString().slice(0,4000),links:[...fragment.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.textContent?.trim(),href:a.href}))};
+              }
+              return {headingPath:hierarchy.map(h=>h.heading),text:(el as HTMLElement).innerText.trim(),nearbyText:local.innerText.slice(0,1600),links:[...local.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.textContent?.trim(),href:a.href}))};
+            });
+          }
+          const labels=new Map(headings.map(el=>[(el as HTMLElement).innerText.trim(),Number(el.getAttribute('aria-level')??el.tagName.slice(1))||2]));
+          return raw.split('\n').map(line=>labels.has(line.trim())?'#'.repeat(labels.get(line.trim())!)+' '+line.trim():line).join('\n');
         }
         if (ty === "selector_text") {
           if (!sel) return null;
           const els = Array.from(document.querySelectorAll(sel)).filter(vis);
-          return els.map((e) => (e as HTMLElement).innerText.trim().replace(/\s+/g, " ").slice(0, 5000));
+          return els.map((e) => {
+            const text=(e as HTMLElement).innerText.trim().replace(/\s+/g, " ").slice(0,5000);
+            if(!sourced)return text;
+            const links=[...(e.matches('a[href]')?[e as HTMLAnchorElement]:[]),...e.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0,8).map(a=>({text:a.innerText.trim().slice(0,160),href:a.href}));
+            return {text,links};
+          });
         }
         if (ty === "selector_html") {
           if (!sel) return null;
@@ -2241,10 +2632,29 @@ export async function extractFromSession(
             }));
         }
         return null;
+        }
+        const data=extract();
+        const search=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
+        return {source:{url:location.href,title:document.title,observed_at:new Date().toISOString(),kind:search?'search_lead':'page_observation'},data};
       },
-      { ty: type, sel: selector, hidden: includeHidden }
+      { ty: type, sel: selector, hidden: includeHidden, query,sourced:readingWindow?.includeSource===true }
     );
-    return { ok: true, output: JSON.stringify(result, null, 2) };
+    const result=observed.data;
+    const output=(data:unknown)=>JSON.stringify(readingWindow?.includeSource?{source:observed.source,data}:data,null,2);
+    if(readingWindow&&type==='text'&&!query&&typeof result==='string'){
+      const offset=Math.max(0,Math.floor(readingWindow.offset??0));
+      const limit=Math.max(500,Math.min(6000,Math.floor(readingWindow.maxChars??5000)));
+      const text=result.slice(offset,offset+limit),next=offset+text.length;
+      return {ok:true,output:output({url:observed.source.url,offset,total_chars:result.length,next_offset:next<result.length?next:null,text})};
+    }
+    if(readingWindow&&type==='links'&&Array.isArray(result)){
+      const offset=Math.max(0,Math.floor(readingWindow.offset??0));let links=result.slice(offset,offset+10);
+      while(links.length>1&&JSON.stringify(links).length>6000)links.pop();
+      return {ok:true,output:output({url:observed.source.url,offset,total_matches:result.length,next_offset:offset+links.length<result.length?offset+links.length:null,links})};
+    }
+    if(readingWindow?.includeSource&&Array.isArray(result)&&['text','selector_text','selector_html','headings'].includes(type))
+      return {ok:true,output:output(pageExtractedItems(result,readingWindow,type==='selector_text'))};
+    return { ok: true, output: output(result) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -2270,7 +2680,7 @@ export async function getSessionCookies(
   if (!session) return { ok: false, error: `Unknown session_id: ${sessionId}` };
   touchSession(session);
   try {
-    const cookies = await session.context.cookies();
+    const cookies = await session.context.cookies([session.page.url()]);
     return { ok: true, output: JSON.stringify(cookies, null, 2), cookies };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -2299,7 +2709,8 @@ export async function clearSessionCookies(
   if (!session) return { ok: false, error: `Unknown session_id: ${sessionId}` };
   touchSession(session);
   try {
-    await session.context.clearCookies();
+    const cookies = await session.context.cookies([session.page.url()]);
+    for (const cookie of cookies) await session.context.clearCookies({ name: cookie.name, domain: cookie.domain, path: cookie.path });
     return { ok: true, output: "COOKIES_CLEARED" };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

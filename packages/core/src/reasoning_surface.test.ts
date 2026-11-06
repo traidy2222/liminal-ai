@@ -58,6 +58,13 @@ test("isImplementShipUserMessage detects TSP implement", () => {
   );
 });
 
+test("writing prose does not pull code from a later negative instruction", () => {
+  assert.equal(isImplementShipUserMessage("Write an explanation of agent harnesses. Do not use tools or run code."), false);
+  assert.equal(isImplementShipUserMessage("Write a short overview; no code execution is needed."), false);
+  assert.equal(isImplementShipUserMessage("Write a short overview. Do not browse, write files or run code."), false);
+  assert.equal(isImplementShipUserMessage("Write Python code to parse this CSV and test it"), true);
+});
+
 test("isResearchFreshnessUserMessage detects current-events prompts", () => {
   assert.equal(isResearchFreshnessUserMessage("update yourself on whats going on with iran"), true);
   assert.equal(isResearchFreshnessUserMessage("explain quantum computing"), false);

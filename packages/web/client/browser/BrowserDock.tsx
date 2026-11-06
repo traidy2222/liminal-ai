@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useChats } from "../chat/useChats.js";
-import { webApiStreamUrl } from "../webApiAuth.js";
+import { webApiFetch, webApiStreamUrl } from "../webApiAuth.js";
 import { PanelResizeHandle } from "../terminal/PanelResizeHandle.js";
+import { useChats } from "../chat/useChats.js";
 
 export type BrowserViewWire = {
   chatId?: string;
@@ -65,6 +65,7 @@ function BrowserStreamPane({
   const paneRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const viewport = useRef({ width: viewportWidth, height: viewportHeight });
   const [status, setStatus] = useState<"connecting" | "live" | "error">("connecting");
 
   useEffect(() => {
@@ -90,7 +91,8 @@ function BrowserStreamPane({
       if (disposed) return;
       if (typeof ev.data === "string") {
         try {
-          const meta = JSON.parse(ev.data) as { type?: string; url?: string };
+          const meta = JSON.parse(ev.data) as { type?: string; url?: string; viewportWidth?: number; viewportHeight?: number };
+          if (meta.viewportWidth && meta.viewportHeight) viewport.current = { width: meta.viewportWidth, height: meta.viewportHeight };
           if (meta.type === "meta" && meta.url && paneRef.current) {
             /* url shown in parent header */
           }
@@ -131,7 +133,7 @@ function BrowserStreamPane({
       const pane = paneRef.current;
       if (!pane) return;
       const rect = pane.getBoundingClientRect();
-      const pt = mapToViewport(ev.clientX, ev.clientY, rect, viewportWidth, viewportHeight);
+      const pt = mapToViewport(ev.clientX, ev.clientY, rect, viewport.current.width, viewport.current.height);
       if (!pt) return;
       if (ev.type === "pointerdown" && ev.button === 0) {
         sendInput({
@@ -151,7 +153,7 @@ function BrowserStreamPane({
       const pane = paneRef.current;
       if (!pane) return;
       const rect = pane.getBoundingClientRect();
-      const pt = mapToViewport(ev.clientX, ev.clientY, rect, viewportWidth, viewportHeight);
+      const pt = mapToViewport(ev.clientX, ev.clientY, rect, viewport.current.width, viewport.current.height);
       if (!pt) return;
       sendInput({
         type: "wheel",
@@ -176,8 +178,18 @@ function BrowserStreamPane({
         background: "#0a0f14",
         cursor: "crosshair",
         touchAction: "none",
+        height: "100%",
+        outline: "none",
       }}
-      onPointerDown={onPointer}
+      tabIndex={0}
+      onPointerDown={event => { event.currentTarget.focus(); onPointer(event); }}
+      onKeyDown={event => {
+        if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+        event.preventDefault();
+        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) sendInput({type: "type", text: event.key});
+        else sendInput({type: "keydown", key: [event.ctrlKey ? "Control" : "", event.metaKey ? "Meta" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : "", event.key === " " ? "Space" : event.key].filter(Boolean).join("+")});
+      }}
+      onPaste={event => { event.preventDefault(); sendInput({type: "type", text: event.clipboardData.getData("text/plain")}); }}
       onWheel={onWheel}
     >
       <img
@@ -203,116 +215,100 @@ function BrowserStreamPane({
   );
 }
 
-/** Collapsible live browser panel (CDP screencast + click/scroll relay). */
+type Tab = { sessionId: string; url: string; title: string; paused: boolean; suspended?: boolean };
+
+/** App-level browser workspace. Always renders the agent's live page, never an iframe copy. */
 export function BrowserDock() {
   const { state } = useChats();
-  const chatId = state.activeChatId;
+  return state.activeChatId ? <ChatBrowserDock key={state.activeChatId} chatId={state.activeChatId} /> : null;
+}
+
+function ChatBrowserDock({ chatId }: { chatId: string }) {
   const [open, setOpen] = useState(false);
+  const [tabs, setTabs] = useState<Tab[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [address, setAddress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<{url: string; title: string}[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [bodyHeight, setBodyHeight] = useState(defaultBrowserHeight);
-  const [view, setView] = useState<BrowserViewWire | null>(null);
-
-  useEffect(() => {
-    setView(null);
-    setOpen(false);
+  const initialized = useRef(false);
+  const lastState = useRef("");
+  const refresh = useCallback(async () => {
+    try {
+      const response = await webApiFetch("/api/browser/control", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action: "state", chatId}) });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "Browser unavailable");
+      const fingerprint = JSON.stringify(data);
+      if (lastState.current === fingerprint) return;
+      lastState.current = fingerprint;
+      setTabs(data.tabs); setHistory(data.history || []);
+      setSelected(data.selectedTabId ?? null);
+    } catch (e) { setError(String(e)); }
   }, [chatId]);
-
+  const command = useCallback(async (action: string, sessionId?: string, url?: string) => {
+    try {
+      const response = await webApiFetch("/api/browser/control", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({action, sessionId, url, chatId})});
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "Browser command failed");
+      if (data.sessionId) { setSelected(data.sessionId); setOpen(true); }
+      setError(null); await refresh();
+    } catch (e) { setError(String(e)); }
+  }, [refresh, chatId]);
   useEffect(() => {
-    const onView = (ev: Event) => {
-      const detail = (ev as CustomEvent<BrowserViewWire>).detail;
-      if (!detail) return;
-      if (detail.chatId && detail.chatId !== chatId) return;
-      if (!detail.open) {
-        setView(null);
-        setOpen(false);
-        return;
-      }
-      setView(detail);
-      setOpen(true);
+    // Restore once per mounted workspace; the server also deduplicates restoration.
+    if (!initialized.current) { initialized.current = true; void command("restore"); }
+    const timer = setInterval(() => { void refresh(); }, 10000);
+    const onView = (event: Event) => {
+      const view = (event as CustomEvent<BrowserViewWire>).detail;
+      if (view?.chatId !== chatId) return;
+      if (view?.open) { setSelected(view.sessionId); setOpen(true); }
+      void refresh();
     };
     window.addEventListener("liminal:browser_view", onView);
-    return () => window.removeEventListener("liminal:browser_view", onView);
-  }, [chatId]);
-
+    return () => { clearInterval(timer); window.removeEventListener("liminal:browser_view", onView); };
+  }, [refresh, command, chatId]);
+  const tab = tabs.find(t => t.sessionId === selected);
+  useEffect(() => {
+    if (open && tab?.suspended) void command("focus", tab.sessionId);
+  }, [open, tab?.sessionId, tab?.suspended, command]);
+  useEffect(() => { setAddress(tab?.url ?? ""); }, [tab?.url, selected]);
   const onResizeHeight = useCallback((delta: number) => {
-    const { min, max } = browserHeightBounds();
-    setBodyHeight((h) => Math.min(max, Math.max(min, h + delta)));
+    const {min, max} = browserHeightBounds(); setBodyHeight(h => Math.min(max, Math.max(min, h + delta)));
   }, []);
-
-  if (!view?.open) return null;
-
-  const useNativeEmbed = view.embedMode !== "screencast";
-  const embedUrl = view.url?.trim() ?? "";
-  const vw = view.viewportWidth ?? 1280;
-  const vh = view.viewportHeight ?? 800;
-
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        borderTop: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(8,12,18,0.96)",
-        display: "flex",
-        flexDirection: "column",
-        maxHeight: open ? bodyHeight + 40 : 0,
-      }}
-    >
-      <PanelResizeHandle axis="vertical" onDragDelta={onResizeHeight} />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "6px 12px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-        }}
-      >
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#9fd4ff" }}>Browser</span>
-        <span
-          style={{
-            flex: 1,
-            fontSize: 12,
-            color: "#8aa0b5",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-          title={view.url}
-        >
-          {view.title?.trim() || view.url || "Agent browser"}
-        </span>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "#8aa0b5",
-            cursor: "pointer",
-            fontSize: 12,
-          }}
-        >
-          {open ? "Hide" : "Show"}
-        </button>
-      </div>
-      {open && (
-        <div style={{ height: bodyHeight, display: "flex", flexDirection: "column" }}>
-          {useNativeEmbed && embedUrl.startsWith("http") ? (
-            <iframe
-              title="Agent browser"
-              src={embedUrl}
-              style={{ flex: 1, width: "100%", border: "none", background: "#0a0f14" }}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-            />
-          ) : (
-            <BrowserStreamPane sessionId={view.sessionId} viewportWidth={vw} viewportHeight={vh} />
-          )}
-          <div style={{ padding: "4px 12px 8px", fontSize: 11, color: "#6d8296" }}>
-            {useNativeEmbed
-              ? "Native page embed — interact directly in the panel."
-              : "Click or scroll to interact — agent retains control between your actions."}
-          </div>
-        </div>
-      )}
+  const navigate = (event: React.FormEvent) => {
+    event.preventDefault(); const raw = address.trim(); if (!raw) return;
+    const url = raw.includes("://") ? raw : raw.includes(".") && !raw.includes(" ") ? `https://${raw}` : `https://www.google.com/search?q=${encodeURIComponent(raw)}`;
+    void command(tab ? "navigate" : "open", tab?.sessionId, url);
+  };
+  return <section aria-label="Liminal browser" style={{flexShrink: 0, borderTop: "1px solid var(--border, #34414d)", background: "var(--panel, #141b23)"}}>
+    <div style={{display: "flex", gap: 8, padding: "6px 12px", alignItems: "center"}}>
+      <button onClick={() => setOpen(!open)}>Browser · {tabs.length} tabs {open ? "▾" : "▸"}</button>
+      <button onClick={() => {setOpen(true); void command("open");}} aria-label="New browser tab">＋ New tab</button>
+      {tab && <span style={{flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis"}}>{tab.title}</span>}
     </div>
-  );
+    {open && <>
+      <PanelResizeHandle axis="vertical" onDragDelta={onResizeHeight}/>
+      <div role="tablist" style={{display: "flex", overflowX: "auto", gap: 4, padding: "4px 8px"}}>{tabs.map(t => <div key={t.sessionId} style={{display: "flex", flexShrink: 0}}>
+        <button role="tab" aria-selected={t.sessionId === selected} onClick={() => {setSelected(t.sessionId); void command("focus", t.sessionId);}}>{t.title.slice(0, 30)}</button>
+        <button aria-label={`Close ${t.title}`} onClick={() => {void command("close", t.sessionId);}}>×</button>
+      </div>)}</div>
+      <form onSubmit={navigate} style={{display: "flex", gap: 6, padding: "6px 8px"}}>
+        <button type="button" disabled={!tab} onClick={() => {void command("back", selected!);}} aria-label="Back">←</button>
+        <button type="button" disabled={!tab} onClick={() => {void command("forward", selected!);}} aria-label="Forward">→</button>
+        <button type="button" disabled={!tab} onClick={() => {void command("reload", selected!);}} aria-label="Reload">↻</button>
+        <input aria-label="Browser address" style={{flex: 1, minWidth: 80}} value={address} onChange={e => setAddress(e.target.value)} placeholder="Search or enter address"/>
+        <button type="submit">Go</button>
+        <button type="button" onClick={() => setShowHistory(!showHistory)}>History</button>
+        {tab && <button type="button" onClick={() => {void command(tab.paused ? "resume" : "pause", selected!);}}>{tab.paused ? "Resume agent" : "Take control"}</button>}
+      </form>
+      {showHistory && <div style={{maxHeight: 160, overflowY: "auto", padding: 8}}>
+        <button onClick={() => {void command("clear_history");}}>Clear history</button>
+        {tab && <button onClick={() => {void command("clear_site_data", selected!);}}>Clear this site’s saved data</button>}
+        {history.slice().reverse().map(h => <div key={h.url}><button onClick={() => {setShowHistory(false); void command(tab ? "navigate" : "open", selected ?? undefined, h.url);}}>{h.title || h.url}</button></div>)}
+      </div>}
+      {error && <p role="alert" style={{padding: 8}}>{error}</p>}
+      <div style={{height: bodyHeight}}>{tab?.suspended ? <p style={{padding: 24}}>Sleeping tab — loads when needed. <button onClick={() => {void command("focus", tab.sessionId);}}>Load this tab</button></p> : tab ? <BrowserStreamPane key={tab.sessionId} sessionId={tab.sessionId} viewportWidth={1280} viewportHeight={800}/> : <p style={{padding: 24}}>Open a tab and sign in. Your agent shares this browser session.</p>}</div>
+    </>}
+  </section>;
 }

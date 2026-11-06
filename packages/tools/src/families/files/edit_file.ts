@@ -11,6 +11,8 @@
 import { readFile, access } from "node:fs/promises";
 import { atomicWriteText } from "../../shared/atomic_file_write.js";
 import path from "node:path";
+import { createHash } from "node:crypto";
+const fileVersion = (text: string): string => createHash("sha256").update(text).digest("hex");
 import { resolveWorkspaceRoot } from "@liminal/core";
 import { defineTool } from "../../shared/helpers.js";
 import { resolveWithinWorkspace } from "../../shared/file_path_guard.js";
@@ -86,7 +88,7 @@ export const editFileTool = defineTool({
     "  insert_at: {line, content}                         — insert content at a specific line number (no search needed).\n" +
     "WHEN: Changing part of a file that already exists.\n" +
     "NOT WHEN: Creating a new file or replacing a whole file — use write_file (mode=create/overwrite/append).\n" +
-    "TIP: If your search string fails (0 matches), run grep_file to get fresh line content — file edits earlier this turn make previous reads stale.",
+    "TIP: Reuse known post-edit content. Return SHA256 can be supplied as expected_sha256 for the next edit. Reread on a version mismatch or failed replacement context.",
   requiresApproval: true,
   dangerLevel: "cautious",
   resourceLocks: (args) => {
@@ -98,6 +100,7 @@ export const editFileTool = defineTool({
   parameters: {
     type: "object",
     properties: {
+      expected_sha256: {type:"string",description:"Optional SHA256 from the last successful edit; rejects an intervening modification without changing the file."},
       path: {
         type: "string",
         description: "Path to the existing file to edit.",
@@ -189,6 +192,16 @@ export const editFileTool = defineTool({
       return { ok: false, error: `Cannot read file: ${String(e)}` };
     }
 
+    const expected = args["expected_sha256"];
+    if(expected !== undefined && (typeof expected !== "string" || !/^[a-f0-9]{64}$/i.test(expected)))
+      return {ok:false,error:"expected_sha256 must be a 64-character SHA256"};
+    if(typeof expected === "string" && expected.toLowerCase() !== fileVersion(rawContent))
+      return {ok:false,error:"File version changed; no edit applied. Read the changed content before retrying."};
+    const writeCurrent = async (next: string) => {
+      if(await readFile(filePath,"utf8") !== rawContent) throw new Error("File changed during editing; no edit applied. Read the changed content before retrying.");
+      await atomicWriteText(filePath,next);
+    };
+
     // ── MODE: insert_at ──────────────────────────────────────────────────────
     if (hasInsertAt) {
       const insertObj = args["insert_at"] as { line?: number; content?: string };
@@ -231,14 +244,14 @@ export const editFileTool = defineTool({
       );
 
       try {
-        await atomicWriteText(filePath, nextContent);
+        await writeCurrent(nextContent);
       } catch (e) {
         return { ok: false, error: `Write failed: ${String(e)}` };
       }
 
       return {
         ok: true,
-        output: `Inserted ${addedCount} line${addedCount !== 1 ? "s" : ""} at line ${insertIdx + 1} in ${path.basename(filePath)} (${totalLines} → ${totalLines + addedCount} lines)`,
+        output: `Inserted ${addedCount} line${addedCount !== 1 ? "s" : ""} at line ${insertIdx + 1} in ${path.basename(filePath)} (${totalLines} → ${totalLines + addedCount} lines)\nSHA256: ${fileVersion(nextContent)}`,
       };
     }
 
@@ -304,11 +317,11 @@ export const editFileTool = defineTool({
           "\n"
       );
       try {
-        await atomicWriteText(filePath, current);
+        await writeCurrent(current);
       } catch (e) {
         return { ok: false, error: `Write failed: ${String(e)}` };
       }
-      return { ok: true, output: [`Written: ${filePath}`, ...report].join("\n") };
+      return { ok: true, output: [`Written: ${filePath}`, `SHA256: ${fileVersion(current)}`, ...report].join("\n") };
     }
 
     // ── MODE: diff ───────────────────────────────────────────────────────────
@@ -383,12 +396,12 @@ export const editFileTool = defineTool({
     );
 
     try {
-      await atomicWriteText(filePath, nextContent);
+      await writeCurrent(nextContent);
     } catch (e) {
       return { ok: false, error: `Write failed: ${String(e)}` };
     }
 
     const note = appliedAt !== parsed.oldStart ? ` (fuzzy: stated line ${parsed.oldStart}, matched at line ${appliedAt})` : "";
-    return { ok: true, output: `Patched ${path.basename(filePath)} — 1 hunk at line ${appliedAt}${note}` };
+    return { ok: true, output: `Patched ${path.basename(filePath)} — 1 hunk at line ${appliedAt}${note}\nSHA256: ${fileVersion(nextContent)}` };
   },
 });

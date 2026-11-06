@@ -1,7 +1,7 @@
 name: liminal_desktop
 description: "Liminal — the native desktop app for the Liminal agent harness."
 publish_to: "none"
-version: 0.1.26
+version: 0.1.27
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

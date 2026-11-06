@@ -1,3 +1,4 @@
+import '../models/procedure_activity.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/chat_reducer.dart' as chat_reducer;
@@ -18,17 +19,22 @@ class ChatSessionController extends ChangeNotifier {
 
   /// User-controlled collapse for the embedded browser dock.
   bool browserDockExpanded = true;
+
   /// User-controlled collapse for the live file-edit dock.
   bool fileEditDockExpanded = true;
+
   /// User-controlled collapse for the Ghostty terminal dock.
   bool terminalDockExpanded = true;
+
   /// User-dragged terminal body height (px); null = default fraction of screen.
   double? terminalBodyHeight;
+
   /// User-dragged right-rail width (px); null = default layout width.
   double? dockRailWidth;
   TerminalPanelState? terminalPanel;
 
   List<MessageEntry> get messages => _state.messages;
+  List<ProcedureActivity> get procedureActivities => _state.procedureActivities;
   bool get busy => _state.busy;
   List<PendingApproval> get pendingApprovals => _state.pendingApprovals;
   PendingApproval? get pendingApproval => _state.pendingApproval;
@@ -37,6 +43,7 @@ class ChatSessionController extends ChangeNotifier {
   String? get connectionError => _state.connectionError;
   String? get personaBootstrapProgress => _state.personaBootstrapProgress;
   String? get personaBootstrapStage => _state.personaBootstrapStage;
+  List<Map<String, dynamic>> personaBootstrapArtifacts = [];
   BrowserViewState? get browserView => _state.browserView;
   FileEditViewState? get fileEditView => _state.fileEditView;
   ContextSnapshot? get contextSnapshot => _state.contextSnapshot;
@@ -156,6 +163,12 @@ class ChatSessionController extends ChangeNotifier {
   }
 
   void applyServerEvent(String event, Map<String, dynamic> data) {
+    if (event == 'persona_bootstrap_progress' && data['artifacts'] is List) {
+      personaBootstrapArtifacts = (data['artifacts'] as List)
+          .whereType<Map>()
+          .map((a) => Map<String, dynamic>.from(a))
+          .toList();
+    }
     final prevBrowserOpen = _state.browserView?.open ?? false;
     final prevFileEditOpen = _state.fileEditView?.open ?? false;
     final next = chat_reducer.reduceChatEvent(_state, event, data);

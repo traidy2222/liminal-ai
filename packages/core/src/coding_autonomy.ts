@@ -17,9 +17,7 @@ export function buildCodingTurnInjection(input: { userMessage: string }): string
     "**Loop:** (1) **Locate** — grep_file / read_file(offset+limit) / list_dir for paths you will touch. " +
     "(2) **Mutate** — edit_file replacements from fresh grep/read text; write_file mode=create for new files only. " +
     "(3) **Verify** — after edits the harness auto-runs run_lint and injects [VERIFY RESULT]; read it before your summary. For UIs use browser_open (include_console:true). Run run_tests when needed.\n" +
-    "**File currency (R-FILE-CURRENCY):** After you successfully edit or write a file, every earlier read_file/grep result for that path in chat history is **stale**. " +
-    "Before the next edit on the same path: grep_file first — never reuse search strings from before your last successful edit on that file. " +
-    "If edit_file reports 0 matches or context mismatch, grep_file — you are editing from an outdated snapshot.\n" +
+    "**File currency:** Reuse known current content and successful edit results. Reread on an external change, version mismatch or replacement failure, not after every successful edit.\n" +
     "**Execution:** On Windows the shell is PowerShell (see protocol). One run_shell at a time; long builds need explicit timeout_ms.\n" +
     `${scale} When verification passes (or the user scope is met), reply in chat with paths changed and what you verified.`
   );

@@ -6,6 +6,8 @@ test('bridge reserves a turn before asynchronous harness setup', async () => {
   let finish!: () => void;
   const pending = new Promise<void>(r => { finish = r; });
   let calls = 0;
+  const accepted:string[]=[];
+  bridge.onUserMessageAccepted=(message:string)=>accepted.push(message);
   bridge.workspaceRoot = process.cwd();
   bridge.harness = { getIsRunning: () => false, send: async () => { calls++; await pending; } };
   bridge.emit = () => {};
@@ -14,6 +16,7 @@ test('bridge reserves a turn before asynchronous harness setup', async () => {
     const rejected = bridge.sendUserMessage('two').then(() => false, (e: Error) => /busy/i.test(e.message));
     assert.equal(await Promise.race([rejected, new Promise<boolean>(r => setTimeout(() => r(false), 100))]), true, 'second turn must reject before the first finishes');
     assert.equal(calls, 1);
+    assert.deepEqual(accepted,['one'],'only an accepted message changes chat recency');
     assert.equal(bridge.isBusy, true);
     assert.ok(bridge.turnStartedAt);
   } finally { finish(); await first; bridge.stopHeartbeat(); }

@@ -18,6 +18,7 @@
     "packages/*"
   ],
   "scripts": {
+    "cache:stats": "node scripts/cache-stats.mjs",
     "voice:install": "node packages/core/local-voice/setup.mjs install",
     "transcription:install": "node packages/core/local-asr/setup.mjs install",
     "transcription:status": "node packages/core/local-asr/setup.mjs status",
@@ -60,6 +61,7 @@
     "docs:gen": "node scripts/gen-docs-env.mjs",
     "changelog:gen": "node scripts/gen-changelog.mjs",
     "changelog:import": "node scripts/changelog-import-from-docs.mjs",
+    "benchmark:browser": "node scripts/benchmark-browser-realworld.mjs",
     "benchmark:provider-strategies": "node scripts/benchmark-provider-strategies.mjs",
     "docs:check": "node scripts/docs-check.mjs",
     "docs:dev": "vitepress dev docs",

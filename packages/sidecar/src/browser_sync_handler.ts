@@ -1,4 +1,42 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { controlBrowserWorkspace, registerDesktopBrowser, pollDesktopBrowser, completeDesktopBrowserCommand } from "@liminal/tools";
+
+/** Browser commands use a bearer header: no browser state or profile secrets in URLs. */
+export function tryHandleBrowserWorkspaceRequest(req: IncomingMessage, res: ServerResponse,
+  opts: { token: string }): boolean {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  if (url.pathname !== "/browser/control" && url.pathname !== "/browser/desktop") return false;
+  if (req.headers.authorization !== `Bearer ${opts.token}` || req.headers.origin) {
+    res.writeHead(401); res.end("Unauthorized"); return true;
+  }
+  res.setHeader("Content-Type", "application/json"); res.setHeader("Cache-Control", "no-store");
+  void (async () => {
+    try {
+      if (req.method !== "POST") { res.writeHead(405); res.end(); return; }
+      const body = await readJsonBody(req) as Record<string, unknown>;
+      if (url.pathname === "/browser/control") {
+        const result = await controlBrowserWorkspace(String(body.action ?? "state"),
+          typeof body.sessionId === "string" ? body.sessionId : undefined,
+          typeof body.url === "string" ? body.url : undefined,
+          typeof body.chatId === "string" && body.chatId.trim() ? body.chatId.trim() : undefined);
+        res.end(JSON.stringify(result)); return;
+      }
+      const clientId = String(body.clientId ?? "");
+      if (body.action === "register") registerDesktopBrowser(clientId, Number(body.port));
+      else if (body.action === "poll") {
+        const command = await pollDesktopBrowser(clientId);
+        res.end(JSON.stringify({ ok: true, command })); return;
+      } else if (body.action === "complete") completeDesktopBrowserCommand(clientId, String(body.id ?? ""),
+        typeof body.error === "string" ? body.error : undefined);
+      else throw new Error("Unknown desktop browser action");
+      res.end(JSON.stringify({ ok: true }));
+    } catch (error) {
+      if (!res.headersSent) res.statusCode = 400;
+      res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    }
+  })();
+  return true;
+}
 import {
   getSessionCookies,
   userNavigateBrowserSession,
@@ -7,7 +45,12 @@ import {
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c) => chunks.push(c as Buffer));
+    let bytes = 0;
+    req.on("data", (c) => {
+      bytes += c.length;
+      if (bytes > 64 * 1024) { reject(new Error("Browser request too large")); req.destroy(); }
+      else chunks.push(c as Buffer);
+    });
     req.on("end", () => {
       try {
         const raw = Buffer.concat(chunks).toString("utf8").trim();
@@ -18,88 +61,4 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on("error", reject);
   });
-}
-
-/** Export Playwright session cookies so the desktop WebView can mirror auth state. */
-export function tryHandleBrowserCookiesRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  opts: { token: string }
-): boolean {
-  if (req.method !== "GET") return false;
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  if (url.pathname !== "/browser/cookies") return false;
-
-  const presented = url.searchParams.get("token")?.trim() ?? "";
-  if (presented !== opts.token) {
-    res.writeHead(401, { "Content-Type": "text/plain" });
-    res.end("Unauthorized");
-    return true;
-  }
-
-  const sessionId = url.searchParams.get("sessionId")?.trim() ?? "";
-  if (!sessionId) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end("sessionId required");
-    return true;
-  }
-
-  void (async () => {
-    const got = await getSessionCookies(sessionId);
-    if (!got.ok) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: got.error }));
-      return;
-    }
-    res.writeHead(200, {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    });
-    res.end(JSON.stringify({ ok: true, cookies: got.cookies }));
-  })();
-  return true;
-}
-
-/** Mirror in-app WebView navigations into the agent Playwright session. */
-export function tryHandleBrowserNavigateRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  opts: { token: string }
-): boolean {
-  if (req.method !== "POST") return false;
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  if (url.pathname !== "/browser/navigate") return false;
-
-  const presented = url.searchParams.get("token")?.trim() ?? "";
-  if (presented !== opts.token) {
-    res.writeHead(401, { "Content-Type": "text/plain" });
-    res.end("Unauthorized");
-    return true;
-  }
-
-  const sessionId = url.searchParams.get("sessionId")?.trim() ?? "";
-  if (!sessionId) {
-    res.writeHead(400, { "Content-Type": "text/plain" });
-    res.end("sessionId required");
-    return true;
-  }
-
-  void (async () => {
-    try {
-      const body = (await readJsonBody(req)) as Record<string, unknown>;
-      const target = String(body["url"] ?? "").trim();
-      if (!target) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "url required" }));
-        return;
-      }
-      const result = await userNavigateBrowserSession({ sessionId, href: target });
-      res.writeHead(result.ok ? 200 : 400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "invalid json" }));
-    }
-  })();
-  return true;
 }

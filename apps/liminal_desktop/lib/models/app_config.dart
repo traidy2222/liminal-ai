@@ -1,5 +1,6 @@
 import 'persona_ui_copy.dart';
 import 'persona_ui_theme.dart';
+import '../audio/wake_voice.dart';
 
 class AppConfig {
   AppConfig({
@@ -22,6 +23,7 @@ class AppConfig {
     this.dictationSilenceMsShort = 1500,
     this.dictationSilenceMsLong = 2500,
     this.dictationMaxRecordingMs = 60000,
+    this.wakeVoice = const WakeVoiceSettings(),
   });
 
   final bool apiKeyConfigured;
@@ -43,6 +45,7 @@ class AppConfig {
   final int dictationSilenceMsShort;
   final int dictationSilenceMsLong;
   final int dictationMaxRecordingMs;
+  final WakeVoiceSettings wakeVoice;
 
   PersonaUiTheme get resolvedTheme {
     if (personaUiTheme != null) return personaUiTheme!;
@@ -81,6 +84,7 @@ class AppConfig {
     int? dictationSilenceMsShort,
     int? dictationSilenceMsLong,
     int? dictationMaxRecordingMs,
+    WakeVoiceSettings? wakeVoice,
   }) {
     return AppConfig(
       apiKeyConfigured: apiKeyConfigured ?? this.apiKeyConfigured,
@@ -102,6 +106,7 @@ class AppConfig {
       dictationSilenceMsShort: dictationSilenceMsShort ?? this.dictationSilenceMsShort,
       dictationSilenceMsLong: dictationSilenceMsLong ?? this.dictationSilenceMsLong,
       dictationMaxRecordingMs: dictationMaxRecordingMs ?? this.dictationMaxRecordingMs,
+      wakeVoice: wakeVoice ?? this.wakeVoice,
     );
   }
 
@@ -135,6 +140,7 @@ class AppConfig {
             )
           : null,
       ttsEnabled: json['ttsEnabled'] as bool? ?? false,
+      wakeVoice: WakeVoiceSettings.fromJson((json['wakeVoice'] as Map?)?.cast<String, dynamic>()),
       ttsVoice: json['ttsVoice'] as String? ?? 'af_sky',
       dictationAudioCue: json['dictationAudioCue'] as bool? ?? false,
       dictationMinRecordingMs: ms('dictationMinRecordingMs', 1500),

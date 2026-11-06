@@ -1,10 +1,7 @@
 /**
- * Harness-injected rule recall (core-only; avoids core → @liminal/tools import cycle).
- * Injected once per send() when entering round 2, unless AGENT_RULE_RECALL=0.
- *
- * Rule recall lists **rule IDs only**; canonical wording lives in the tools package
- * system protocol (`## Named rules`). `buildHarnessRuleRecallMessage()` sorts IDs by
- * violation counts from `.agent_rule_stats.json` when stats exist.
+ * Legacy rule catalog for explicit diagnostics and historic telemetry.
+ * Not injected into model requests. The concise session policy is defined in
+ * the tools package; tool schemas and runtime validation own usage details.
  */
 
 /** Individual rule entries keyed by ID for selective injection. */
@@ -36,7 +33,7 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-EDIT-DISCIPLINE":
     "Existing repo files: grep_file or read_file first, then edit_file (replacements or diff). write_file mode=create only for new paths. Refusing whole-file overwrite on non-trivial existing files — use edit_file; mode=overwrite needs confirm_overwrite: true only after read_file when a full replace is intentional.",
   "R-FILE-CURRENCY":
-    "After you successfully edit_file or write_file on path P, every earlier read_file/grep result for P in chat is stale. Before the next edit on P: grep_file for fresh text — never reuse search/replace strings from before your last successful edit. edit_file 0 matches or context mismatch → grep_file, not blind retry.",
+    "Reuse known current content and successful edit results. Reread only on external change, version mismatch or failed replacement context.",
   "R-SYNTAX-COLUMN":
     "For SyntaxError (path:line:col), diagnose from that exact column — count from line start. Never emit replacements where search and replace strings are identical.",
 
@@ -75,9 +72,9 @@ export const HARNESS_RULES: Record<string, string> = {
   "R-VAULT-ENTITIES":
     "Entity brain: one canonical proper name = one vault dossier (## Identity / ## Current / ## History / ## Relationships). Prefer vault_ingest / vault_ingest_entities (bidirectional links) over orphan vault_write. Batch: parallel vault_ingest per entity OR vault_ingest_entities on combined research. MOC/hub (type:moc) links only — no full bios in hubs.",
   "R-RECIPE-REUSE":
-    "When a [KNOWN RECIPE] or [DEFAULT PLAN] block appears in world context, a tool-phase sequence has worked repeatedly for similar goals — adopt it as the plan skeleton unless the task clearly differs. [DEFAULT PLAN] = high reuse + high outcome, established play; deviation needs a stated reason. [KNOWN RECIPE] = early evidence, lean toward it but assess fit. Recipes never set email industry, tone, visual style, or recipient framing — tool order only.",
+    "Recipes are optional historical evidence about process success, not mandatory plans or verified correctness. Match any reuse to the current task.",
   "R-EMAIL-CONTEXT":
-    "Outbound email subject/body/register: use only what the user asked this turn plus signer facts from memory when needed. Never infer industry or vertical style from recipes, recalled job titles, persona, vault, or prior sessions. Skip email_style_infer unless the user named an industry or visual style; default to neutral professional HTML about the stated topic.",
+    "Match the requested recipient, purpose and tone; do not infer industry from unrelated memory or recipes.",
 
   // ── Output ──────────────────────────────────────────────────────────────────
   "R-OUTPUT-QUALITY":
@@ -86,19 +83,19 @@ export const HARNESS_RULES: Record<string, string> = {
     "When the user asks to cite paths, values, or quotes from tool output, echo them verbatim in the final reply — successful tool runs without the requested fields in the answer count as incomplete.",
   "R-MULTI-PART-USER": "Answer or explicitly defer every sub-question in a multi-part message — do not silently skip any part.",
   "R-TURN-FRESHNESS":
-    "New analytical asks: open with What's new for this ask (2–4 bullets); prior memory/vault/chat is background only — ≤2 sentences cross-reference unless user asked for comparison/changelog.",
+    "Answer the current request; check current evidence when needed rather than inheriting the outline of an older brief.",
   "R-TERM-SCOPE":
-    "When the answer hinges on a contested term: Working definition (one sentence); Alternate framing (one sentence) if a common alternative would change the conclusion.",
+    "Clarify overloaded terms only when their meaning materially changes the conclusion.",
 
   // ── Persona / runtime ───────────────────────────────────────────────────────
   "R-RUNTIME-PERSONA-TOOLS":
     "For persona dial changes (humor %, formality, confidence, verbosity, persona strength), call set_runtime_settings(persona_controls:…) — never claim a dial changed from prose alone. Full persona swap → set_persona.",
   "R-EMAIL-STYLE":
-    "Outbound mail: the first gmail_create_draft / outlook_create_draft call is the finished email — formatted body_html + plain body together. Compose full HTML in reasoning before the tool call; plain-only only for thread replies and one-liners.",
+    "Ordinary email may be plain text. Use HTML when requested or useful; styling is not a prerequisite for drafting or sending.",
   "R-EMAIL-DRAFT-SEND":
-    "One compose pass per email: plan subject + body_html + body, then create_draft once. After success, gmail_send_draft / outlook_send_draft with that draftId. Never write_file workspace .html to stage mail. Never stack MCP create_draft with REST create_draft.",
+    "Create a draft when requested; an explicit send request authorizes sending subject to active approvals. Verify recipients, account and returned message/draft identifier.",
   "R-EMAIL-RECIPIENTS":
-    "Use addresses the user gave or that you found in tool output — do not fabricate. Cold outreach: gmail_create_draft per recipient → gmail_send_draft when approved — never gmail_send_message (thread replies only).",
+    "Use verified recipient addresses from the user or tool evidence. Resolve actual ambiguity before sending; follow the active approval policy.",
   "R-EMAIL-ACCOUNT":
     "Multiple mailboxes: use mail_search_inboxes first — it scans **connected** Gmail/Outlook accounts only (mail OAuth scopes). Do not connect_provider or probe MCP/REST for providers list_connectors shows as not connected. Replies need account_hint for the receiving mailbox plus thread_id/messageId from that mailbox.",
   "R-EMAIL-PRIVACY":
@@ -140,15 +137,9 @@ export const HARNESS_RULES: Record<string, string> = {
 import type { TurnIntentClass } from "./intent_inference.js";
 
 const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
-  conversational: ["R-OUTPUT-QUALITY", "R-MULTI-PART-USER", "R-MEMORY-CONTEXT", "R-EMAIL-STYLE", "R-EMAIL-DRAFT-SEND", "R-EMAIL-RECIPIENTS", "R-EMAIL-ACCOUNT", "R-EMAIL-PRIVACY", "R-AGENTCARD"],
-  introspection: ["R-OUTPUT-QUALITY", "R-MEMORY-CONTEXT", "R-TURN-FRESHNESS"],
-  knowledge: [
-    "R-MEMORY-CONTEXT",
-    "R-TURN-FRESHNESS",
-    "R-OUTPUT-QUALITY",
-    "R-MEMORY-FIRST-IDENTITY",
-    "R-VAULT-ENTITIES",
-    "R-YOUTUBE-ANALYTICS",
+  introspection: ["R-MEMORY", "R-ANSWER-FIDELITY"],
+  knowledge: ["R-MEMORY", "R-ANSWER-FIDELITY", "R-CITE-QUALITY"],
+  conversational: ["R-MEMORY", "R-OUTPUT-QUALITY"
   ],
   research: [
     "R-RESEARCH-SCOPE",
@@ -192,25 +183,16 @@ const INTENT_RULE_IDS: Record<TurnIntentClass, string[]> = {
     "R-EMAIL-PRIVACY",
     "R-AGENTCARD",
   ],
-  creative: [
-    "R-OUTPUT-QUALITY",
-    "R-TURN-FRESHNESS",
-    "R-WRITE-DISCIPLINE",
-    "R-TERM-SCOPE",
-    "R-EMAIL-STYLE",
-    "R-EMAIL-DRAFT-SEND",
-    "R-EMAIL-RECIPIENTS",
-    "R-EMAIL-ACCOUNT",
-    "R-EMAIL-PRIVACY",
+  creative: ["R-MEMORY", "R-OUTPUT-QUALITY"
   ],
 };
 
 const TOP_VIOLATION_APPEND = 3;
 
 function formatRuleRecallBody(orderedIds: string[]): string {
-  const lines = orderedIds.map((id) => `- **${id}**`);
+  const lines = orderedIds.map((id) => `- **${id}**: ${HARNESS_RULES[id]}`);
   return (
-    `[REMEMBER — harness protocol rule IDs. Full text for each ID is under "## Named rules" in the fixed system message — use that section as the canonical definition.]\n` +
+    `[OPTIONAL LEGACY RULE CATALOG — definitions shown here; not an automatic turn reminder.]\n` +
     lines.join("\n") +
     `\n`
   );
@@ -231,7 +213,7 @@ export function buildHarnessRuleRecallMessageForIntent(
   const byHits =
     hitCounts.size > 0
       ? [...hitCounts.entries()]
-          .filter(([id]) => HARNESS_RULES[id] && !demotedIds?.has(id))
+          .filter(([id]) => base.includes(id) && HARNESS_RULES[id] && !demotedIds?.has(id))
           .sort((a, b) => b[1] - a[1])
       : [];
   for (const [id] of byHits) {
@@ -244,13 +226,7 @@ export function buildHarnessRuleRecallMessageForIntent(
   return formatRuleRecallBody(base);
 }
 
-/**
- * Compact harness rule recall: lists rule IDs only. Full definitions live in the
- * tools package system protocol under `## Named rules` — avoids duplicating long
- * paragraphs here (token savings, single source of truth).
- *
- * When `hitCounts` is non-empty, IDs are sorted by violation count (highest first).
- */
+/** Render legacy definitions only when an explicit diagnostic caller requests them. */
 export function buildHarnessRuleRecallMessage(
   hitCounts: Map<string, number>,
   demotedIds?: ReadonlySet<string>

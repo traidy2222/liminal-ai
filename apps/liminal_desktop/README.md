@@ -15,11 +15,14 @@ From the **monorepo root**:
 ```bash
 npm run build:sidecar
 cd apps/liminal_desktop
-flutter create . --project-name liminal_desktop
+# Only if you need the generated macOS/Linux runners:
+# flutter create . --project-name liminal_desktop --platforms=macos,linux
 flutter pub get
 ```
 
-`flutter create` adds `windows/`, `macos/`, `linux/` runners. It is safe to re-run; it will not overwrite `lib/`.
+The Windows runner is maintained in the repository, including its app identity.
+Use `flutter create --platforms=macos,linux .` when generating the other runners;
+do not overwrite the maintained Windows runner with a fresh template.
 
 ## Release builds (local)
 
@@ -32,6 +35,23 @@ flutter pub get
 Optional smoke test (Windows): `npm run desktop:test:windows`.
 
 **Windows** — run `liminal_desktop.exe` from `build/windows/x64/runner/Release/` (not the exe alone).
+
+For local Windows app grouping, close Liminal and register the build once from
+the repository root (requires Developer Mode to already be enabled):
+
+```powershell
+.\scripts\register-desktop-identity.ps1 -ReleaseDir "<installed Release folder>" -LocalDevelopment
+```
+
+Windows gives the desktop host and its runtime workers one package/application
+identity. Direct launches of that registered executable activate the package;
+other portable copies and Flutter development runs keep using their own paths.
+The startup handoff retains identity for descendants without a resident launcher.
+AppData and registry virtualization are disabled in the package manifest so the
+existing Liminal configuration and models keep their original locations. The
+build generates `AppxManifest.xml` using the Flutter app version. This local
+registration does not change the ZIP release/update pipeline; distributing an
+MSIX installation requires a signed package and a matching update flow.
 
 **macOS** — `build/macos/Build/Products/Release/liminal_desktop.app` (`liminald/` is inside `Contents/MacOS/`).
 

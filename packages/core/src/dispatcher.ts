@@ -1,3 +1,4 @@
+import type { AgentHarness } from "./agent.js";
 import type { ToolResult, ToolParameterSchema, PropertySchema, ApprovalDecision, ToolExecutionContext } from "./types.js";
 import { cleanupFileWriteStreamManifest, runWithFileWriteStreamOwner } from "./file_write_stream_manifest.js";
 import type { AgentEmitter } from "./events.js";
@@ -37,12 +38,15 @@ function autoApproveToolSet(): Set<string> {
 function validateValue(key: string, val: unknown, schema: PropertySchema): string | null {
   if (schema.anyOf && schema.anyOf.length > 0) {
     let lastErr: string | null = null;
+    let matchingVariantError: string | null = null;
     for (const branch of schema.anyOf) {
       const e = validateValue(key, val, { ...branch, anyOf: undefined });
       if (e === null) return null;
       lastErr = e;
+      if(val && typeof val === "object" && branch.properties &&
+        Object.entries(branch.properties).some(([field,prop])=>prop.enum?.includes((val as Record<string,unknown>)[field]))) matchingVariantError=e;
     }
-    return lastErr ?? `Field "${key}": value did not match allowed variants`;
+    return matchingVariantError ?? lastErr ?? `Field "${key}": value did not match allowed variants`;
   }
   // Type check (JSON has no integer type — accept whole numbers for integer schemas)
   if (schema.type) {
@@ -86,6 +90,15 @@ function validateValue(key: string, val: unknown, schema: PropertySchema): strin
   }
   // Nested object
   if (schema.type === "object" && schema.properties && typeof val === "object" && val !== null) {
+    if (Array.isArray(val)) return `Field "${key}": expected object, got array`;
+    for (const required of schema.required ?? []) {
+      if (!Object.hasOwn(val, required)) return `Field "${key}": missing required field "${required}"`;
+    }
+    if (schema.additionalProperties === false) {
+      for (const field of Object.keys(val)) {
+        if (!Object.hasOwn(schema.properties, field)) return `Field "${key}": unknown field "${field}"`;
+      }
+    }
     for (const [nestedKey, nestedSchema] of Object.entries(schema.properties)) {
       const nestedVal = (val as Record<string, unknown>)[nestedKey];
       if (nestedVal !== undefined) {
@@ -181,7 +194,24 @@ export class ToolDispatcher {
     private readonly dryRunApprovals: boolean = false,
   ) {}
 
+  /** Authoritative approval facts for the runtime tail; no model-inferred permission grants. */
+  approvalState(): { mode: string; may_request_approval: string[]; argument_guards: "enforced" } {
+    const automatic = this.dryRunApprovals || this.autoApproveDestructive;
+    const allow = autoApproveToolSet();
+    return { mode: this.dryRunApprovals ? "simulated" : automatic ? "automatic" : "destructive_only",
+      may_request_approval: automatic ? [] : this.registry.getActiveToolNames().filter(name => {
+        const tool = this.registry.get(name);
+        return tool?.requiresApproval === true && tool.dangerLevel === "destructive" && !allow.has(name);
+      }).sort(), argument_guards: "enforced" };
+  }
+
+  private ownerHarness?: AgentHarness;
+
+  bindHarness(harness:AgentHarness):void { this.ownerHarness=harness; }
+
   private fileWriteHooks?: FileWriteDispatchHooks;
+  private executionGuard?: (name:string,args:Record<string,unknown>)=>Promise<void>;
+  setExecutionGuard(guard:((name:string,args:Record<string,unknown>)=>Promise<void>)|undefined):void {this.executionGuard=guard;}
   /** Per-turn trace ID set by agent.ts at send() start for event correlation. */
   private turnTraceId?: string;
   /** Current ReAct round index (0-based) — set by agent.ts each round for causality tracking. */
@@ -296,7 +326,7 @@ export class ToolDispatcher {
     if (guardMsg) return { ok: false, error: `[ARG GUARD] ${guardMsg}` };
     try {
       const emit = (text: string) => this.emitter.emit("text", { delta: text, channel: "trace" });
-      return await runWithFileWriteStreamOwner(this, () => tool.handler(args, emit, undefined, { scope: this, signal: this.turnAbortSignal }));
+      return await runWithFileWriteStreamOwner(this, () => tool.handler(args, emit, this.ownerHarness, { scope: this, signal: this.turnAbortSignal }));
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -593,13 +623,16 @@ export class ToolDispatcher {
         resourceIds = requestedIds;
       }
       const runHandler = async (): Promise<ToolResult> => {
+        // Feature-specific guards run after locks, approval and edited arguments.
+        // Stored procedures cannot treat an old approval as current authority.
+        await this.executionGuard?.(name,args);
         this.emitter.emit("tool_executing", { callId, name });
         const t0 = Date.now();
         const emit = (text: string) => {
           this.emitter.emit("text", { delta: text, channel: "trace" });
           this.emitter.emit("tool_progress", { callId, delta: text });
         };
-        const result = await tool.handler(args, emit, undefined, { ...executionContext, scope: this, signal: executionContext?.signal ?? this.turnAbortSignal });
+        const result = await tool.handler(args, emit, this.ownerHarness, { ...executionContext, scope: this, signal: executionContext?.signal ?? this.turnAbortSignal });
         this.emitter.emit("tool_timing", { callId, name, durationMs: Date.now() - t0 });
         return result;
       };

@@ -1,6 +1,7 @@
 import readline from 'node:readline';
 for await (const line of readline.createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
+  if (request.op === 'release') { console.log(JSON.stringify({id:request.id,result:{text:'',noSpeech:true,durationSec:0,released:true}})); continue; }
   if (request.op === 'warmup') request.audio = '';
   if (request.audio === 'hang') continue;
   if (request.audio === 'crash') process.exit(4);

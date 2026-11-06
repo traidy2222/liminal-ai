@@ -19,13 +19,15 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. [Desktop 0.1.24](https://github.com/traidy2222/liminal-ai/releases) adds local Whisper transcription by default, optional Qwen accuracy mode, speech gating and language controls in desktop and web. Includes the warmer local JARVIS voice, grounded artifact analysis, REA tools, Google Workspace, guided workflows and searchable model selection. Screenshots show the application with demo workspace data.
+**Release status:** Liminal is in beta. The [0.1.27 release notes](CHANGELOG.md) cover persistent per-chat browsing, cloud or local first-run setup, value-based provider routing with cache telemetry, desktop wake conversations, and experimental verified procedures. Download published installers from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases). Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 
 - **Choose your model.** Connect OpenRouter, OpenAI, or another OpenAI-compatible endpoint, including a local model server. Capabilities depend on the selected model and provider.
 - **Work beyond chat.** A catalog of 245+ tools covers files, shell commands, Git, research, browsers, documents, and integrations. Tool families load on demand.
 - **Follow the work.** Inspect streamed responses, tool calls, results, approval requests, and execution traces as the agent works.
+- **Browse with context.** Each chat keeps its own tabs and selected page, with shared logins. Readable page content and source evidence support browser-first research.
+- **Talk hands-free.** Enable a configurable desktop wake phrase and local transcription, then hear streamed replies while delegated work runs in the background. Local voice models require a separate installation.
 - **Keep useful context.** Persistent notes, keyword and optional vector recall, and an optional Obsidian vault help carry knowledge between sessions.
 - **Use the interface that fits.** The Flutter desktop app, React web UI, and terminal UI share the same harness engine.
 
@@ -64,6 +66,8 @@ The model picker replaces OpenRouter model bundles with a searchable catalog of 
 | ![OpenRouter model search with model IDs and capability information](assets/marketing/update-2026-11-02/03-model-search.png) | ![Preferences grouped into focused controls with advanced options available separately](assets/marketing/update-2026-11-02/05-preferences.png) |
 
 **Single-model mode** keeps chat, background completions, and vision requests on your selected model. It disables separate embeddings, hosted speech models, and automatic model fallbacks while preserving your previous specialist settings. Vision requires a model that supports image input; keyword memory search remains available.
+
+Optional automatic chat titles use a separately configured low-cost OpenRouter model. Set `AGENT_CHAT_AUTO_TITLE=0` to disable that additional call.
 
 *Web screenshots use the current application with isolated demo data. They illustrate the interface, not completed agent runs or performance benchmarks. Model availability changes over time. [View the image pack and capture notes](assets/marketing/update-2026-11-02/README.md).*
 

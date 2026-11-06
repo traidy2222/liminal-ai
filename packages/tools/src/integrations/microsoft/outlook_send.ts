@@ -136,14 +136,14 @@ const sendParams: Record<string, PropertySchema> = {
   body_html: {
     type: "string",
     description:
-      "**Required for new outbound mail** (with body_text). HTML body — inline styles, nested tables. " +
-      "Include on the **first** outlook_create_draft call. No em/en dashes or &mdash; (R-EMAIL-COPY).",
+      "Optional HTML body. " +
+      "Use for requested formatting; optional for ordinary plain-text mail.",
   },
   body_text: {
     type: "string",
     description:
-      "**Required alongside body_html** for new outbound mail. Plain fallback. " +
-      "PLAIN-tier only: thread replies and one-liners may omit body_html. No em/en dashes (R-EMAIL-COPY).",
+      "Plain message body or HTML fallback. " +
+      "Plain text is suitable for ordinary mail; HTML is optional.",
   },
   attachments: {
     type: "array",

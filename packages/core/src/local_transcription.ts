@@ -1,5 +1,6 @@
 import { runLocalAudio } from "./local_audio_runtime.js";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnPythonWorker } from "./python_worker_process.js";
 import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
 import os from "node:os";
@@ -21,18 +22,21 @@ export class LocalTranscriptionClient {
   private pending?: { id: number; resolve: (audio: LocalTranscript) => void; reject: (error: Error) => void };
   private idle?: ReturnType<typeof setTimeout>;
   private keepWarm = false;
+  private residentGpu = false;
+  get gpuReady(): boolean { return this.child !== undefined && this.residentGpu; }
+  private closing: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly command: string,
     private readonly args: string[],
     private readonly spawnWorker: (command: string, args: string[]) => ChildProcessWithoutNullStreams =
-      (command, args) => spawn(command, args, { stdio: "pipe", windowsHide: true })
+      spawnPythonWorker
   ) {}
 
   private start(): void {
     if (this.child) return;
     const child = this.spawnWorker(this.command, this.args);
-    this.child = child; this.buffer = ""; this.stderr = "";
+    this.child = child; this.buffer = ""; this.stderr = ""; this.residentGpu = false;
     // A decoder crash can close stdin between two requests. Handle the stream's error event
     // as well as the write callback so EPIPE cannot crash the parent daemon.
     child.stdin.on("error", error => { if (this.child === child) this.close(error); });
@@ -52,22 +56,25 @@ export class LocalTranscriptionClient {
           if (result.error) pending.reject(new Error(result.error));
           else {
             if (typeof result.result?.text !== "string" || typeof result.result?.noSpeech !== "boolean") pending.reject(new Error("Local transcription returned an invalid result."));
-            else pending.resolve(result.result);
+            else { this.residentGpu = result.result.residentGpu === true; pending.resolve(result.result); }
           }
         } catch (error) { this.close(error instanceof Error ? error : new Error(String(error))); }
       }
     });
     child.once("error", error => { if (this.child === child) this.close(new Error(`Local transcription could not start: ${error.message}. ${installHelp}`)); });
-    child.once("exit", () => { if (this.child === child) this.close(new Error(`Local transcription stopped unexpectedly. ${this.stderr.slice(-600)}`)); });
+    child.once("exit", (code, signal) => { if (this.child === child) this.close(new Error(`Local transcription stopped unexpectedly (exit ${code ?? signal ?? "unknown"}). ${this.stderr.slice(-600)}`)); });
     // A warm voice should not keep a CLI invocation alive when there is no active request.
     child.unref();
     for (const stream of [child.stdin, child.stdout, child.stderr]) (stream as unknown as { unref?: () => void }).unref?.();
   }
 
   transcribe(payload: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<LocalTranscript> {
-    if (payload["op"] === "warmup") this.keepWarm = true;
     if (signal?.aborted) return Promise.reject(new Error("Local transcription cancelled."));
-    const operation = this.queue.catch(() => {}).then(() => this.request(payload, timeoutMs, signal));
+    const operation = this.queue.catch(() => {}).then(async () => {
+      // A retired CUDA process must exit before its replacement reserves VRAM.
+      await this.closing;
+      return this.request(payload, timeoutMs, signal);
+    });
     this.queue = operation;
     // Cancel a queued request immediately too; request() checks the signal before starting later.
     if (!signal) return operation;
@@ -100,11 +107,27 @@ export class LocalTranscriptionClient {
   }
 
   async closeAndWait(): Promise<void> {
-    const child = this.child;
-    if (!child) return;
-    const exited = new Promise<void>(resolve => child.once("close", () => resolve()));
     this.close();
-    await exited;
+    await this.closing;
+  }
+
+  setKeepWarm(enabled: boolean): void {
+    this.keepWarm = enabled;
+    if (this.idle) { clearTimeout(this.idle); this.idle = undefined; }
+    if (!enabled && this.child && !this.pending) {
+      this.idle = setTimeout(() => this.close(), 120_000); this.idle.unref();
+    }
+  }
+
+  async releaseGpu(allowResident = false, nextResidentReady = false): Promise<void> {
+    if (!this.child) { await this.closing; return; }
+    try {
+      const result = await this.transcribe({ op: "release", allow_resident: allowResident, next_resident_ready: nextResidentReady }, 10_000);
+      if (!result.released) throw new Error("Local ASR did not acknowledge GPU release");
+    } catch {
+      // An old worker or failed park must exit before another GPU model starts.
+      await this.closeAndWait();
+    }
   }
 
   close(error = new Error("Local transcription worker closed.")): void {
@@ -112,11 +135,18 @@ export class LocalTranscriptionClient {
     if (this.idle) { clearTimeout(this.idle); this.idle = undefined; }
     const pending = this.pending; this.pending = undefined;
     pending?.reject(error);
-    child?.kill();
+    if (child) {
+      child.ref();
+      const exited = new Promise<void>(resolve => child.once("close", () => resolve()));
+      this.closing = Promise.all([this.closing, exited]).then(() => {});
+      child.kill();
+    }
   }
 }
 
 export interface LocalTranscript {
+  released?: boolean;
+  residentGpu?: boolean;
   text: string;
   language?: string;
   languageConfidence?: number;
@@ -127,6 +157,11 @@ export interface LocalTranscript {
 }
 let client: LocalTranscriptionClient | undefined;
 let activeHome: string | undefined;
+let keepLocalTranscriptionWarm = false;
+export function retainLocalTranscription(keepWarm: boolean): void {
+  keepLocalTranscriptionWarm = keepWarm;
+  client?.setKeepWarm(keepWarm);
+}
 export function closeLocalTranscription(): void { client?.close(); client = undefined; }
 process.once("exit", closeLocalTranscription);
 
@@ -137,7 +172,10 @@ export async function warmupLocalTranscription(model: string, timeoutMs = 120_00
 
 /** Switching modes releases the old model before loading another; never keep both on the GPU. */
 export function transcribeLocalAudio(model: string, payload: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<LocalTranscript> {
-  return runLocalAudio(`asr:${model}`, async () => { await client?.closeAndWait(); }, async () => {
+  return runLocalAudio(`asr:${model}`, async (nextOwner, allowResident, nextResidentReady) => {
+    if (transcriptionProfile(model) === "whisper") await client?.releaseGpu(allowResident === true && nextOwner === 'speech', nextResidentReady);
+    else await client?.closeAndWait();
+  }, async () => {
     signal?.throwIfAborted();
     const profile = transcriptionProfile(model);
     const root = path.join(home(), profile);
@@ -152,7 +190,8 @@ export function transcribeLocalAudio(model: string, payload: Record<string, unkn
     if (!client || activeHome !== root) {
       closeLocalTranscription(); activeHome = root;
       client = new LocalTranscriptionClient(python, ["-X", "utf8", "-B", "-u", path.join(assets, "worker.py"), "--home", root, "--profile", profile]);
+      client.setKeepWarm(keepLocalTranscriptionWarm);
     }
     return client.transcribe(payload, Math.max(1000, timeoutMs), signal);
-  }, signal);
+  }, signal, {allowResident: transcriptionProfile(model) === 'whisper', residentReady: () => client?.gpuReady === true});
 }

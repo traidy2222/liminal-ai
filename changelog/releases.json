@@ -1,7 +1,43 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.26",
+  "currentVersion": "0.1.27",
   "releases": [
+    {
+      "version": "0.1.27",
+      "date": "2026-11-06",
+      "tagline": "A more capable browser, a faster voice, and a simpler start.",
+      "summary": "Bring the accumulated desktop and web improvements together: persistent per-chat browsing, cloud or local setup, value-based provider routing and cache telemetry, hands-free voice, and experimental verified procedures.",
+      "bullets": [
+        "**Browser built into each chat** — Keep tabs and the selected page scoped to their conversation while sharing the persistent login profile. Browser-first discovery returns readable page content, handles redirects and timeouts, and preserves useful research evidence and source links.",
+        "**Lower idle browser overhead** — Bound browser sessions, retire unused agent tabs, preserve user-owned tabs and release idle browser resources. Desktop shutdown cleans up owned workers and bounds background logs.",
+        "**Cloud or local first run** — Choose a cloud provider or a local OpenAI-compatible server, discover available models, validate tool calling and then generate a persona. Credentials stay in the local secret configuration; interrupted persona generation preserves the previous active persona.",
+        "**Better provider value and cache visibility** — Compare endpoint prices with measured throughput and latency, prefer a fast low-cost endpoint, and retain the same healthy endpoint to reuse its cache. Record actual cached input tokens, cost, time to first token and endpoint identity; missing provider usage remains unknown.",
+        "**Stable context and practical tool use** — Keep changing runtime facts outside the stable prompt prefix, reduce repeated instruction and result overhead, and expose browser tools for normal web work. Repair file-edit checks and prevent ordinary documents from being mistaken for outgoing mail.",
+        "**Chats stay in order** — Opening a chat no longer makes it look recently active. Actual conversation activity controls recency. Optional low-cost OpenRouter titles adapt to substantive work while preserving manual titles.",
+        "**Wake and keep talking** — Configure a desktop wake phrase, listen while minimized or outside Mission Control, and continue speaking after replies. Mission Control stays conversational while delegated workers run and delivers their completion updates once.",
+        "**Smoother local voice** — Stream short spoken segments as replies arrive, recover playback and microphone sessions, and reuse warm local audio workers with GPU-aware handoffs. PCM speech detection repairs silent Windows amplitude readings; bounded worker threads reduce idle memory. Cold model startup still depends on the machine.",
+        "**Windows lifecycle improvements** — Include the native runner, group helper processes with Liminal when Windows package identity is available, and provide optional local identity registration. Portable ZIP installation continues to use the existing updater.",
+        "**Experimental verified procedures** — Explicitly adopt workspace checks, learn bounded JSON-record procedures from verified outcomes, and reuse named inputs through normal tools and approvals. SQLite preserves evidence and versions across processes; dependency drift suspends stale procedures. General productivity gains are not established."
+      ],
+      "docs": [
+        {
+          "label": "Browser automation",
+          "href": "../guides/browser-automation.md"
+        },
+        {
+          "label": "First-run setup",
+          "href": "../start/quickstart.md"
+        },
+        {
+          "label": "Voice and wake listening",
+          "href": "../guides/voice.md"
+        },
+        {
+          "label": "Experimental procedural memory",
+          "href": "../concepts/procedural-memory.md"
+        }
+      ]
+    },
     {
       "version": "0.1.26",
       "date": "2026-11-05",
@@ -13,7 +49,10 @@
         "**Repeated-turn verification** — Regression coverage reproduces late trace ordering and checks subsequent sends. Two consecutive turns against the installed app completed without stale busy events; local Whisper speech and silence checks also passed."
       ],
       "docs": [
-        { "label": "Voice and local transcription", "href": "../guides/voice.md" }
+        {
+          "label": "Voice and local transcription",
+          "href": "../guides/voice.md"
+        }
       ]
     },
     {

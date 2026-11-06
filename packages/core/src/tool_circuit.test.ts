@@ -5,6 +5,12 @@ import {ToolRegistry} from './registry.js';
 import {ToolDispatcher} from './dispatcher.js';
 import {AgentEmitter} from './events.js';
 
+test('correctable browser actions do not trip the backend circuit; closed targets do',()=>{
+ for(const error of ['Unknown ref "e1"','browser_act step 2: locator.click: Timeout 500ms exceeded','wait_ms: ms is required'])
+  assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error}),true);
+ assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error:'browser_act step 2: Target page, context or browser has been closed'}),false);
+});
+
 test("recoverable recall miss does not count as circuit failure", () => {
   assert.equal(
     isRecoverableToolFailure("recall", {

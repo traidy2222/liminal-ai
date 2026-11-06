@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
+import type { SessionBridge } from "./session_bridge.js";
 import {
   PROTOCOL_VERSION,
   serverFrame,
@@ -25,6 +26,8 @@ import {
 } from "./vireon_api.js";
 import {
   fetchManagedInferenceModels,
+  discoverProviderModels,
+  warmupConfiguredTranscription,
   fetchOpenRouterSettingsCatalog,
   liminalAppsEnabled,
   loadChatTranscriptFromSessionLog,
@@ -44,13 +47,13 @@ import {
 import { tryHandleAudioRequest } from "./audio_http.js";
 import { tryHandleBrowserPreviewRequest } from "./browser_preview_handler.js";
 import {
-  tryHandleBrowserCookiesRequest,
-  tryHandleBrowserNavigateRequest,
+  tryHandleBrowserWorkspaceRequest,
 } from "./browser_sync_handler.js";
 import { tryHandleAppProxyRequest } from "./app_proxy_handler.js";
 import { tryHandleAppHtmlRequest } from "./app_html_handler.js";
 import { tryHandleMediaRequest } from "./media_handler.js";
-import { getBrowserPanelFrame, listBrowserSessionIdsForTask, setTerminalViewPublisher } from "@liminal/tools";
+import { getBrowserPanelFrame, listBrowserSessionIdsForTask, setTerminalViewPublisher,
+  shutdownBrowserWorkspace, disconnectDesktopBrowser } from "@liminal/tools";
 import { buildPtyOpenedPayload, createSidecarEnsureTerminal } from "./pty_terminal.js";
 import { createPtyShellPort } from "./pty_shell_port.js";
 import { normalizeWireAttachments } from "./message_attachments.js";
@@ -228,12 +231,7 @@ export class WsServer {
       ) {
         return;
       }
-      if (tryHandleBrowserCookiesRequest(req, res, { token: this.token })) {
-        return;
-      }
-      if (tryHandleBrowserNavigateRequest(req, res, { token: this.token })) {
-        return;
-      }
+      if (tryHandleBrowserWorkspaceRequest(req, res, { token: this.token })) return;
       if (
         tryHandleBrowserPreviewRequest(req, res, {
           token: this.token,
@@ -466,6 +464,12 @@ export class WsServer {
     };
   }
 
+  private desktopConfig(bridge: SessionBridge) {
+    return buildDesktopConfig(bridge, this.repoRoot, {
+      wakePreferences: this.registry.getRuntimePreferences(),
+    });
+  }
+
   private clientRole(ws: WebSocket): RemoteClientMeta["role"] {
     return this.clientMeta.get(ws)?.role ?? "owner";
   }
@@ -492,11 +496,13 @@ export class WsServer {
       void this.dispatch(ws, frame);
     });
     ws.on("close", () => {
+      for (const bridge of this.registry.listBridges()) bridge.setVoiceSession(ws, false);
       if (meta.role !== "owner") this.remoteHost.detachGuest(ws);
       this.clientMeta.delete(ws);
       this.clients.delete(ws);
     });
     ws.on("error", () => {
+      for (const bridge of this.registry.listBridges()) bridge.setVoiceSession(ws, false);
       if (meta.role !== "owner") this.remoteHost.detachGuest(ws);
       this.clientMeta.delete(ws);
       this.clients.delete(ws);
@@ -561,7 +567,7 @@ export class WsServer {
     let appConfig: Awaited<ReturnType<typeof buildDesktopConfig>> | undefined;
     if (bridge) {
       try {
-        appConfig = await buildDesktopConfig(bridge, this.repoRoot);
+        appConfig = await this.desktopConfig(bridge);
       } catch (err) {
         initError = initError ?? (err instanceof Error ? err.message : String(err));
         appConfig = undefined;
@@ -646,6 +652,27 @@ export class WsServer {
     }
     try {
       switch (command) {
+        case "procedure_manage": {
+          if(role!=="owner") {this.ack(ws,id,false,"Procedure management is local-owner only");return;}
+          const d=data as import("@liminal/protocol").ClientCommandMap["procedure_manage"];
+          const bridge=this.registry.get(d.chatId);if(!bridge)throw new Error("Unknown chat");
+          if(bridge.isBusy && !["list","inspect","evidence","retire","disable","correct"].includes(d.action))throw new Error("Wait for this task to finish before changing procedure validation");
+          const memory=await bridge.harness.getProcedureRuntime();if(!memory)throw new Error("Procedural memory is disabled");
+          let result:unknown;
+          if(d.action==="list") result={...(await memory.inspect()),episodes:memory.store.db.prepare('SELECT id,body FROM episodes WHERE workspace_id=? ORDER BY rowid DESC LIMIT 20').all(memory.workspace.id).map((r:any)=>({runId:r.id,...JSON.parse(r.body)}))};
+          else if(d.action==="inspect") {const p=(await memory.inspect()).procedures.find(v=>v.body.versionId===d.versionId);if(!p)throw new Error("Procedure not found");result={procedure:p,history:memory.store.history(p.body.procedureId),events:memory.store.events(p.body.provenance.sourceRunId).slice(-32).map(e=>({...e,data:JSON.stringify(e.data).slice(0,2000),projected:JSON.stringify(e.data).length>2000,evidenceAvailable:true})),validations:memory.store.validations(p.body.versionId)};}
+          else if(d.action==="evidence") {const event=memory.store.event(d.eventId??"");if(!event||memory.store.episode(event.runId)?.workspaceId!==memory.workspace.id)throw new Error("Evidence is not in this workspace");result=memory.store.evidence(event.eventId,d.offset??0);}
+          else if(d.action==="preview_contract") result=await memory.previewContract(d.contractPath??"");
+          else if(d.action==="adopt_contract") {if(!d.expectedSourceHash)throw new Error("Inspect the verifier before adopting it");result=await memory.adoptContract(d.contractPath??"",d.expectedSourceHash);}
+          else if(d.action==="learn") result=await memory.control(()=>memory.learn({runId:d.runId,contractId:d.contractId??"",inputs:(d.inputs??{}) as Record<string,import("@liminal/core").Json>,reviseVersionId:d.versionId}));
+          else if(d.action==="validate") result=await memory.control(()=>memory.validate(d.versionId??"",d.inputs??{}));
+          else if(d.action==="correct") result=await memory.control(async()=>memory.correction(d.versionId??"",d.correction??""));
+          else if(d.action==="recover") result=memory.recoverValidation(d.versionId??"");
+          else if(d.action==="retire") result=memory.retire(d.versionId??"",d.correction??"Retired by user");
+          else if(d.action==="disable") {memory.disable(d.versionId??"",d.disabled!==false);result={disabled:d.disabled!==false};}
+          else throw new Error("Unknown procedure action");
+          this.ack(ws,id,true,undefined,result??{});return;
+        }
         case "ping":
           this.sendTo(ws, serverFrame("pong", { at: Date.now() }));
           void this.inboxWatcher.runOnce("resume");
@@ -675,12 +702,23 @@ export class WsServer {
 
         case "get_or_create_orchestrator_chat": {
           try {
-            const bridge = await this.registry.getOrCreateOrchestratorChat();
+            const bridge = await this.registry.getOrCreateOrchestratorChat({
+              activate: (data as { activate?: boolean }).activate !== false,
+            });
             this.broadcastChatList();
             this.ack(ws, id, true, undefined, { chatId: bridge.chatId });
           } catch (err) {
             this.ack(ws, id, false, err instanceof Error ? err.message : String(err));
           }
+          return;
+        }
+
+        case "set_voice_session": {
+          const d = data as { chatId: string; active: boolean };
+          const bridge = this.registry.get(d.chatId);
+          if (!bridge || typeof d.active !== "boolean") return this.ack(ws, id, false, "Invalid voice session.");
+          bridge.setVoiceSession(ws, d.active);
+          this.ack(ws, id, true);
           return;
         }
 
@@ -745,8 +783,6 @@ export class WsServer {
             if (bridge.isBusy) {
               return this.ack(ws, id, false, "Agent is busy; finish the current turn first.");
             }
-          this.registry.touch(d.chatId, msg.slice(0, 60) || "Image attachment");
-          this.broadcastChatList();
           this.ack(ws, id, true);
           bridge
             .sendUserMessage(msg, {
@@ -768,6 +804,15 @@ export class WsServer {
           const bridge = this.registry.get(d.chatId);
           const ok = bridge?.abort() ?? false;
           this.ack(ws, id, ok, ok ? undefined : "No turn in progress.");
+          return;
+        }
+
+        case "cancel_speech": {
+          const d = data as { chatId: string; voiceId?: string };
+          const bridge = this.registry.get(d.chatId);
+          if (!bridge) return this.ack(ws, id, false, "Unknown chat.");
+          bridge.harness.cancelVoiceSpeech(d.voiceId);
+          this.ack(ws, id, true);
           return;
         }
 
@@ -818,7 +863,7 @@ export class WsServer {
           const bridge = role === "owner" ? await this.registry.getOrCreateActive()
             : this.registry.get(this.clientMeta.get(ws)!.chatId!);
           if (!bridge) return this.ack(ws, id, false, "Shared chat is unavailable.");
-          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          const config = await this.desktopConfig(bridge);
           this.ack(ws, id, true, undefined, wireAppConfig(config));
           return;
         }
@@ -836,6 +881,14 @@ export class WsServer {
           return;
         }
 
+        case "get_cache_stats": {
+          const { readCacheStats } = await import("@liminal/core");
+          const chatId = role === "owner" ? (data as { chatId?: string }).chatId : this.clientMeta.get(ws)!.chatId;
+          if (role !== "owner" && !chatId) return this.ack(ws, id, false, "Chat scope required.");
+          this.ack(ws, id, true, undefined, await readCacheStats(chatId));
+          return;
+        }
+
         case "update_settings": {
           const d = data as { patch: Record<string, unknown> };
           await patchHarnessSettings(this.registry, d.patch ?? {});
@@ -844,6 +897,9 @@ export class WsServer {
             this.inboxWatcher.restart();
           }
           const bridge = this.registry.getActiveBridge();
+            if (envPatch && Object.keys(envPatch).some(k => /^(AGENT_WAKE_WORD_|AGENT_TRANSCRIBE_)/.test(k))) {
+              void warmupConfiguredTranscription(bridge?.harness.getRuntimePreferences() ?? null);
+            }
           const snapshot = buildSettingsSnapshot(
             bridge?.harness.getRuntimePreferences() ?? null,
             bridge
@@ -858,10 +914,14 @@ export class WsServer {
           const d = data as { apiKey?: string; model?: string; baseURL?: string };
           await saveProviderCredentials(this.registry, this.repoRoot, d);
           const bridge = await this.registry.getOrCreateActive();
-          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          const config = await this.desktopConfig(bridge);
           this.broadcastChatList();
           this.ack(ws, id, true, undefined, wireAppConfig(config));
           return;
+        }
+        case 'discover_provider_models': {
+          const result=await discoverProviderModels(data as {apiKey?:string;baseURL?:string});
+          this.ack(ws,id,true,undefined,result);return;
         }
 
         case "submit_persona_bootstrap": {
@@ -870,9 +930,12 @@ export class WsServer {
           if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");
           await bridge.submitPersonaBootstrap(d.input, { skip: d.skip });
           this.broadcastChatList();
-          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          const config = await this.desktopConfig(bridge);
           this.ack(ws, id, true, undefined, wireAppConfig(config));
           return;
+        }
+        case 'cancel_persona_bootstrap': {
+          this.registry.get((data as {chatId:string}).chatId)?.cancelPersonaBootstrap();this.ack(ws,id,true);return;
         }
 
         case "get_vireon_account": {
@@ -909,7 +972,7 @@ export class WsServer {
           this.broadcast(serverFrame("vireon_account", wire));
           this.broadcastChatList();
           const bridge = this.registry.getActiveBridge() ?? (await this.registry.getOrCreateActive());
-          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          const config = await this.desktopConfig(bridge);
           this.ack(ws, id, true, undefined, { ...wire, appConfig: wireAppConfig(config) });
           return;
         }
@@ -929,7 +992,7 @@ export class WsServer {
           this.broadcast(serverFrame("vireon_account", wire));
           this.broadcastChatList();
           const bridge = this.registry.getActiveBridge() ?? (await this.registry.getOrCreateActive());
-          const config = await buildDesktopConfig(bridge, this.repoRoot);
+          const config = await this.desktopConfig(bridge);
           this.ack(ws, id, true, undefined, { ...wire, appConfig: wireAppConfig(config) });
           return;
         }
@@ -1746,7 +1809,8 @@ export class WsServer {
   }
 
   /** Graceful teardown. */
-  close(): void {
+  close(): Promise<void> {
+    const browserShutdown = shutdownBrowserWorkspace().catch(() => undefined).finally(disconnectDesktopBrowser);
     for (const ws of this.clients) {
       try {
         ws.close(1001, "sidecar_shutdown");
@@ -1769,6 +1833,7 @@ export class WsServer {
     this.remoteUiWss.close();
     this.wss.close();
     this.http.close();
+    return browserShutdown;
   }
 
   /** Loopback port after `listen()` — used by terminal embed pages. */

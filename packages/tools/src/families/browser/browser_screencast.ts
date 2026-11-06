@@ -7,6 +7,7 @@ import {
   getBrowserSession,
   refreshBrowserEmbedView,
   syncBrowserSessionUrl,
+  getBrowserPanelFrame,
 } from "./browser_runtime.js";
 
 const OPEN = 1;
@@ -32,9 +33,27 @@ type ScreencastState = {
   cdp: CDPSession;
   subscribers: Set<BrowserStreamSocket>;
   refreshTimer?: ReturnType<typeof setTimeout>;
+  idleStopTimer?: ReturnType<typeof setTimeout>;
 };
 
 const screencasts = new Map<string, ScreencastState>();
+const starting = new Map<string, Promise<void>>();
+
+export function browserScreencastHasSubscribers(sessionId: string): boolean {
+  const state = screencasts.get(sessionId);
+  return !!state && [...state.subscribers].some(ws => ws.readyState === OPEN);
+}
+
+function scheduleIdleStop(state: ScreencastState): void {
+  if (state.subscribers.size || state.idleStopTimer) return;
+  state.idleStopTimer = setTimeout(() => {
+    state.idleStopTimer = undefined;
+    if (screencasts.get(state.sessionId) === state && !state.subscribers.size) {
+      void stopBrowserScreencastForSession(state.sessionId);
+    }
+  }, 1500);
+  state.idleStopTimer.unref();
+}
 
 function parseViewport(page: Page): { width: number; height: number } {
   const vp = page.viewportSize();
@@ -96,20 +115,19 @@ export function getBrowserScreencastMeta(sessionId: string): {
 
 export async function startBrowserScreencast(sessionId: string): Promise<void> {
   if (screencasts.has(sessionId)) return;
+  const pending = starting.get(sessionId); if (pending) return pending;
+  const launch = startScreencast(sessionId);
+  starting.set(sessionId, launch);
+  try { await launch; } finally { starting.delete(sessionId); }
+}
+
+async function startScreencast(sessionId: string): Promise<void> {
   const session = getBrowserSession(sessionId);
   if (!session) return;
 
   const page = session.page;
-  const { width, height } = parseViewport(page);
+  const { width, height } = await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => parseViewport(page));
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Page.enable");
-  await cdp.send("Page.startScreencast", {
-    format: "jpeg",
-    quality: 72,
-    maxWidth: width,
-    maxHeight: height,
-    everyNthFrame: 1,
-  });
 
   const state: ScreencastState = {
     sessionId,
@@ -133,6 +151,14 @@ export async function startBrowserScreencast(sessionId: string): Promise<void> {
       /* ignore frame errors */
     }
   });
+  try {
+    await cdp.send("Page.enable");
+    await cdp.send("Page.startScreencast", {
+      format: "jpeg", quality: 72, maxWidth: width, maxHeight: height, everyNthFrame: 1,
+    });
+    if (!getBrowserSession(sessionId)) await stopBrowserScreencastForSession(sessionId);
+    else scheduleIdleStop(state);
+  } catch (error) { await stopBrowserScreencastForSession(sessionId); throw error; }
 }
 
 export async function stopBrowserScreencastForSession(sessionId: string): Promise<void> {
@@ -148,6 +174,7 @@ export async function stopBrowserScreencastForSession(sessionId: string): Promis
   }
   state.subscribers.clear();
   if (state.refreshTimer) clearTimeout(state.refreshTimer);
+  if (state.idleStopTimer) clearTimeout(state.idleStopTimer);
   try {
     await state.cdp.send("Page.stopScreencast");
   } catch {
@@ -163,15 +190,22 @@ export async function stopBrowserScreencastForSession(sessionId: string): Promis
 export function subscribeBrowserScreencast(sessionId: string, ws: BrowserStreamSocket): void {
   const state = screencasts.get(sessionId);
   if (!state) return;
+  if (state.idleStopTimer) clearTimeout(state.idleStopTimer);
+  state.idleStopTimer = undefined;
   state.subscribers.add(ws);
   const meta = getBrowserScreencastMeta(sessionId);
   if (meta && ws.readyState === OPEN) {
     ws.send(JSON.stringify({ type: "meta", ...meta }));
+    const frame = getBrowserPanelFrame(sessionId);
+    if (frame) ws.send(frame, { binary: true });
   }
 }
 
 export function unsubscribeBrowserScreencast(sessionId: string, ws: BrowserStreamSocket): void {
-  screencasts.get(sessionId)?.subscribers.delete(ws);
+  const state = screencasts.get(sessionId);
+  if (!state) return;
+  state.subscribers.delete(ws);
+  scheduleIdleStop(state);
 }
 
 export function parseBrowserStreamInput(raw: unknown): BrowserStreamInput | null {

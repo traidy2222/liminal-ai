@@ -5,12 +5,9 @@ import {
   createBrowserStreamServer,
   tryHandleBrowserStreamUpgrade,
 } from "@liminal/sidecar/browser-stream";
-import {
-  tryHandleBrowserCookiesRequest,
-  tryHandleBrowserNavigateRequest,
-} from "@liminal/sidecar/browser-sync";
-import { getBrowserPanelFrame } from "@liminal/tools";
+import { getBrowserPanelFrame, controlBrowserWorkspace } from "@liminal/tools";
 import { readTokenFromUpgrade } from "./pty_auth.js";
+import { readCacheStats } from "@liminal/core";
 
 export interface WebBrowserContext {
   browserWss: ReturnType<typeof createBrowserStreamServer>;
@@ -47,6 +44,16 @@ export function registerBrowserRoutes(
   ctx: WebBrowserContext,
   requireAuth: (req: Request, res: Response, next: () => void) => void
 ): void {
+  router.get("/api/cache/stats", requireAuth, (req, res) => {
+    void readCacheStats(typeof req.query.chatId === "string" ? req.query.chatId : undefined)
+      .then(stats => res.json(stats)).catch(() => res.status(500).json({ error: "Cache statistics unavailable" }));
+  });
+  router.post("/api/browser/control", requireAuth, (req, res) => {
+    const chatId = typeof req.body?.chatId === "string" ? req.body.chatId.trim() : "";
+    if (!chatId) { res.status(400).json({ ok: false, error: "chatId required" }); return; }
+    void controlBrowserWorkspace(String(req.body?.action ?? "state"), req.body?.sessionId, req.body?.url, chatId)
+      .then(result => res.json(result)).catch(error => res.status(400).json({ ok: false, error: String(error) }));
+  });
   router.get("/api/browser/preview", requireAuth, (req, res) => {
     const sessionId = String(req.query.sessionId ?? "").trim();
     if (!sessionId) {

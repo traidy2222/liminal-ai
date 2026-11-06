@@ -63,7 +63,7 @@ test("ensureProviderApiKeysInProcess hydrates KIMCHI_API_KEY from repo .env", ()
   }
 });
 
-test("openrouter base ignores castai AGENT_API_KEY and uses OPENROUTER_API_KEY", () => {
+test("openrouter resolution ignores a Cast AI key without mutating process credentials", () => {
   const prev = saveEnv(["KIMCHI_API_KEY", "OPENROUTER_API_KEY", "AGENT_API_KEY"]);
   try {
     process.env["AGENT_API_KEY"] = "castai_v1_stale_from_kimchi";
@@ -72,7 +72,7 @@ test("openrouter base ignores castai AGENT_API_KEY and uses OPENROUTER_API_KEY",
     const cfg = resolveProviderConfig({ baseURL: "https://openrouter.ai/api/v1" });
     assert.equal(cfg.apiKey, "sk-or-v1-openrouter-live");
     assert.equal(cfg.keySource, "OPENROUTER_API_KEY");
-    assert.equal(process.env["AGENT_API_KEY"], undefined);
+    assert.equal(process.env["AGENT_API_KEY"], 'castai_v1_stale_from_kimchi');
   } finally {
     restoreEnv(prev);
   }

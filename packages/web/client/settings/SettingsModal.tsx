@@ -1,5 +1,6 @@
 import { isMultiModelRouter } from "@liminal/core/model-policy";
 import { OpenRouterModelPicker } from "./OpenRouterModelPicker.js";
+import { CacheUsagePanel } from "./CacheUsagePanel.js";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { HarnessSettingsApiField } from "@liminal/core";
 import {
@@ -442,6 +443,7 @@ export function SettingsModal({
                       </div>
                     )}
 </div>) : null}
+                {showProvider && <CacheUsagePanel />}
                 {showProvider ? (
                   <section className="settings-provider">
                     <h2>Model & provider</h2>

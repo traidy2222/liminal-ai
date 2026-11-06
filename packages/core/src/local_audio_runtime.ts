@@ -1,12 +1,13 @@
-/** Serialize local speech/ASR and release the previous GPU model before changing tasks. */
+/** Serialize local speech/ASR; warm GPU weights may coexist only with verified headroom. */
 let queue: Promise<unknown> = Promise.resolve();
-let active: { owner: string; release: () => Promise<void> } | undefined;
+let active: { owner: string; release: (nextOwner?: string, allowResident?: boolean, nextResidentReady?: boolean) => Promise<void> } | undefined;
 
-export function runLocalAudio<T>(owner: string, release: () => Promise<void>, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export function runLocalAudio<T>(owner: string, release: (nextOwner?: string, allowResident?: boolean, nextResidentReady?: boolean) => Promise<void>, operation: () => Promise<T>, signal?: AbortSignal, options?: {allowResident?: boolean; residentReady?: boolean | (() => boolean)}): Promise<T> {
   const work = queue.catch(() => {}).then(async () => {
     signal?.throwIfAborted();
     if (active?.owner !== owner) {
-      await active?.release();
+      const residentReady = typeof options?.residentReady === 'function' ? options.residentReady() : options?.residentReady === true;
+      await active?.release(owner, options?.allowResident === true, residentReady);
       active = { owner, release };
     }
     return operation();

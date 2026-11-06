@@ -275,9 +275,9 @@ export function createGmailSendTools(): ToolDefinition[] {
     description:
       "WHAT: Create a Gmail draft (users.drafts.create) — this call **is** the finished styled email.\n" +
       "WHEN: Any new outbound mail the user wants drafted or reviewed in Gmail.\n" +
-      "HOW: Plan subject + formatted body_html + plain body **before** calling. Pass all three in **one** invocation — body_html is the real email (nested tables, inline styles). Use this REST helper for attachments, multipart MIME and explicit account selection.\n" +
+      "HOW: Pass subject and plain body; body_html is optional for requested or useful formatting. Use this REST helper for attachments, multipart MIME and explicit account selection.\n" +
       "AFTER: gmail_send_draft(draftId) when the user approves send.\n" +
-      "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
+      "STYLE: Match the requested message; plain body is suitable for ordinary mail and body_html is optional.\n" +
       "SAFETY: approval-gated — verify recipients before approving.",
     parameters: composeParameters,
     requiresApproval: true,
@@ -367,7 +367,7 @@ export function createGmailSendTools(): ToolDefinition[] {
       "WHEN: **Thread reply only** — existing Gmail thread with thread_id or reply_to_message_id.\n" +
       "NOT FOR: Cold outreach, new mail, or bulk sends — use gmail_create_draft + gmail_send_draft (harness blocks cold gmail_send_message).\n" +
       "HOW: Prefer mcp_google_gmail_* for search/read/labels; gmail_create_draft + gmail_send_draft for draft-then-send.\n" +
-      "STYLE: Neutral professional body_html + body (R-EMAIL-STYLE). email_style_infer only if user named an industry/style this turn. Plain-only for thread replies.\n" +
+      "STYLE: Match the requested message; plain body is suitable for ordinary mail and body_html is optional.\n" +
       "SAFETY: approval-gated — verify recipients; real mail leaves the account on approve.",
     parameters: composeParameters,
     requiresApproval: true,

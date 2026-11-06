@@ -150,7 +150,7 @@ test("integration: open fixture, snapshot refs, click button", { timeout: 120_00
     includeConsole: false,
   });
   assert.equal(acted.ok, true);
-  if (acted.ok) assert.match(acted.output, /clicked|ACTIONS_DONE: success/i);
+  if (acted.ok) assert.match(acted.output, /clicked|ACTIONS_EXECUTED:/i);
 
   await closeBrowserSession({ sessionId });
 });

@@ -121,15 +121,15 @@ test("repairEmailUnicode fixes Latin-1 misread UTF-8 em dash", () => {
   assert.equal(repairEmailUnicode(`Line${bad}end`), "Line—end");
 });
 
-test("humanizeOutboundEmailCopy replaces em dashes with commas", () => {
+test("humanizeOutboundEmailCopy preserves requested punctuation", () => {
   assert.equal(
     humanizeOutboundEmailCopy("hope the experience — and the team — resonated"),
-    "hope the experience, and the team, resonated"
+    "hope the experience — and the team — resonated"
   );
-  assert.equal(humanizeOutboundEmailCopy("Hi&mdash;there"), "Hi, there");
+  assert.equal(humanizeOutboundEmailCopy("Hi&mdash;there"), "Hi&mdash;there");
 });
 
-test("buildMimeMessage repairs mojibake and humanizes dashes in bodies", () => {
+test("buildMimeMessage repairs mojibake without rewriting punctuation in bodies", () => {
   const dash = "\uFFE2\uFF80\uFF94";
   const raw = decodeRaw(
     buildMimeMessage({
@@ -139,10 +139,10 @@ test("buildMimeMessage repairs mojibake and humanizes dashes in bodies", () => {
       html: `<p>Hi${dash}there</p>`,
     })
   );
-  const plainB64 = Buffer.from("Hello, world", "utf8").toString("base64");
-  const htmlB64 = Buffer.from("<p>Hi, there</p>", "utf8").toString("base64");
-  assert.ok(raw.replace(/\r\n/g, "").includes(plainB64), "plain body should humanize dashes");
-  assert.ok(raw.replace(/\r\n/g, "").includes(htmlB64), "html body should humanize dashes");
+  const plainB64 = Buffer.from("Hello—world", "utf8").toString("base64");
+  const htmlB64 = Buffer.from("<p>Hi—there</p>", "utf8").toString("base64");
+  assert.ok(raw.replace(/\r\n/g, "").includes(plainB64), "plain body should preserve repaired punctuation");
+  assert.ok(raw.replace(/\r\n/g, "").includes(htmlB64), "html body should preserve repaired punctuation");
 });
 
 test("decodeHtmlEntities decodes named dashes and quotes", () => {

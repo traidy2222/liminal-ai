@@ -6,6 +6,7 @@ import type { SSEManager } from "./sse.js";
 import type { WebRemoteService } from "./web_remote.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
+  providerConnectionConfigured,discoverProviderModels,validateProviderSetup,persistValidatedProvider,
   DEFAULT_CHAT_ATTACHMENT_LIMITS,
   normalizeChatAttachmentName,
   parseDataUrlAttachment,
@@ -204,6 +205,7 @@ export function createRouter(
       const activeMeta = await readChatMetadata(bridge.chatId);
       res.json({
         webAuthToken: localAuth.token,
+        providerConfigured:providerConnectionConfigured(bridge.harness.config.openRouterApiKey),
         uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
         approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
         personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -1327,6 +1329,20 @@ export function createRouter(
     res.json({ ok: true, output: result.output });
   });
 
+  router.post('/api/setup/models',async(req,res)=>{
+    try{res.json(await discoverProviderModels(req.body));}catch(error){res.status(400).json({error:error instanceof Error?error.message:'Model discovery failed.'});}
+  });
+  router.post('/api/setup/provider',async(req,res)=>{
+    const bridge=active();if(bridge.isBusy){res.status(409).json({error:'Finish the current turn first.'});return;}
+    try{
+      const cfg=await validateProviderSetup(req.body);
+      const patch=await persistValidatedProvider(cfg);
+      await bridge.harness.patchRuntimePreferences(patch,{persist:true});
+      await chatManager.reloadRuntimePrefs();
+      await bridge.reapplyProvider(bridge.harness.getRuntimePreferences());
+      res.json({ok:true});
+    }catch(error){res.status(400).json({error:error instanceof Error?error.message:'Provider setup failed.'});}
+  });
   router.put("/api/settings", async (req, res) => {
     const bridge = active();
     if (bridge.harness.getIsRunning()) {
@@ -1570,6 +1586,7 @@ export function createRouter(
     }
   });
 
+  router.post('/api/persona/cancel',(_req,res)=>{active().cancelPersonaBootstrap();res.json({ok:true});});
   router.post("/api/persona/bootstrap", async (req, res) => {
     const bridge = active();
     const { input, skip } = req.body as { input?: string; skip?: boolean };

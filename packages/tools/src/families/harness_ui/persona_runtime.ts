@@ -1,4 +1,6 @@
 import type { AgentHarness } from "@liminal/core";
+import {runHarnessEffectiveEnvContext} from '@liminal/core';
+import {personaStagingDirectory,personaTransaction,recoverPersonaPromotion,checkPersonaCancellation} from './persona_transaction.js';
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
 import {
   migratePersonaUiTheme,
@@ -94,6 +96,8 @@ export function getPersonaArtifactsPaths(): PersonaArtifactsPaths {
   //     profile, subsequent reads stay on global.
   //   - Else use global (greenfield install with no persona yet).
   const paths = personaActivePaths();
+  recoverPersonaPromotion(paths.global);
+  recoverPersonaPromotion(paths.legacy);
   let dir: string;
   if (paths.legacyOnly) {
     dir = paths.legacy;
@@ -104,6 +108,7 @@ export function getPersonaArtifactsPaths(): PersonaArtifactsPaths {
   } else {
     dir = paths.global;
   }
+  dir=personaStagingDirectory()??dir;
   const soulDir = join(dir, SOUL_SUBDIR);
   return {
     dir,
@@ -264,6 +269,7 @@ export async function installDefaultPersonaArtifacts(
   const controls = LIMINAL_DEFAULT_CONTROLS;
   const sourcePrompt = options?.sourcePrompt ?? "default";
 
+  await personaTransaction(getPersonaArtifactsPaths().dir,async()=>{
   await writePersonaArtifact("runtime_profile", JSON.stringify(profile, null, 2));
   await writePersonaArtifact("soul_identity", LIMINAL_DEFAULT_SOUL.identity);
   await writePersonaArtifact("soul_voice", LIMINAL_DEFAULT_SOUL.voice);
@@ -272,6 +278,7 @@ export async function installDefaultPersonaArtifacts(
   await writePersonaArtifact("ui_theme", JSON.stringify(LIMINAL_DEFAULT_UI_THEME, null, 2));
   await writePersonaArtifact("ui_copy", JSON.stringify(LIMINAL_DEFAULT_UI_COPY, null, 2));
   await finalizePersonaManifest({ sourcePrompt, profile, controls });
+  });
 
   await applyPersonaProfileToHarness(harness, profile);
   await harness.patchRuntimePreferences(
@@ -312,8 +319,13 @@ export async function generatePersonaFromInput(
   coreInput: string,
   strength: number,
   modifier?: string,
-  onProgress?: PersonaProgressFn
+  onProgress?: PersonaProgressFn,
+  signal?:AbortSignal
 ): Promise<PersonaGenerationBundle> {
+  const dir=getPersonaArtifactsPaths().dir;
+  return runHarnessEffectiveEnvContext(harness.getRuntimePreferences(),()=>personaTransaction(dir,()=>generatePersonaDraft(harness,coreInput,strength,modifier,onProgress),signal));
+}
+async function generatePersonaDraft(harness:AgentHarness,coreInput:string,strength:number,modifier?:string,onProgress?:PersonaProgressFn):Promise<PersonaGenerationBundle>{
   const { openRouterApiKey, model, baseURL } = harness.config;
   const capabilitySummary = buildHarnessCapabilitySummary(
     harness.registry.getAll().map((t) => t.name)
@@ -327,11 +339,11 @@ export async function generatePersonaFromInput(
           if (detail?.artifacts?.length) {
             for (const a of detail.artifacts) {
               if (a.status === "streaming" && a.content) {
-                void writePersonaArtifactStreaming(a.id, a.content).catch(() => undefined);
+                // Partial content is a UI preview; only complete artifacts are staged on disk.
               }
             }
           }
-          onProgress?.(stage, message, detail);
+          checkPersonaCancellation();onProgress?.(stage, message, detail);
         },
         async (id, content) => {
           await writePersonaArtifact(id, content);

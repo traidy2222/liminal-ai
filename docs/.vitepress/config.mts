@@ -40,6 +40,7 @@ export default defineConfig({
           { text: "Runtime behavior", link: "/concepts/runtime-behavior" },
           { text: "Identity stack", link: "/concepts/identity-stack" },
           { text: "Memory and vault", link: "/concepts/memory-and-vault" },
+          { text: "Procedural memory preview", link: "/concepts/procedural-memory" },
           { text: "Persona system", link: "/concepts/persona-system" },
           { text: "UI streaming", link: "/concepts/ui-streaming" },
           { text: "Rich message rendering", link: "/concepts/rich-message-rendering" },

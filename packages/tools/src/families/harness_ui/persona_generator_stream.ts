@@ -1,4 +1,5 @@
 import { withProviderRequestSpacing, effectiveHarnessEnvRaw, buildOpenRouterAttributionHeaders } from "@liminal/core";
+import {personaGenerationSignal} from './persona_transaction.js';
 
 function personaGenTimeoutMs(): number {
   return Math.max(
@@ -70,7 +71,7 @@ export async function* callPersonaModelStream(
               temperature,
               stream: true,
             }),
-            signal: controller.signal,
+            signal: personaGenerationSignal()?AbortSignal.any([controller.signal,personaGenerationSignal()!]):controller.signal,
           })
       );
       if (!response.ok) throw new Error(`LLM API returned HTTP ${response.status}`);

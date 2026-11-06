@@ -2,7 +2,7 @@ import type { AccumulatedToolCall, StreamChunk, ToolCallStreamDelta } from "./ty
 import { mergeStreamingToolArgsJson } from "./tool_arg_content_stream.js";
 import type OpenAI from "openai";
 import { InlineReasoningTagStreamParser } from "./inline_reasoning_tags.js";
-import { extractReasoningDeltaFromChunk } from "./reasoning_stream.js";
+import { extractReasoningDeltaFromChunk, ProviderReasoningAccumulator } from "./reasoning_stream.js";
 import { stripProviderSpecialTokens } from "./provider_token_scrub.js";
 
 function sanitizeStreamText(text: string): string {
@@ -24,6 +24,7 @@ export type ProcessedStreamChunk = StreamChunk & {
 
 export class StreamAccumulator {
   private text = "";
+  private readonly providerReasoning = new ProviderReasoningAccumulator();
   private readonly inlineReasoningParser = new InlineReasoningTagStreamParser();
   private toolCallMap: Map<number, AccumulatedToolCall> = new Map();
   private seenToolStart: Set<number> = new Set();
@@ -36,8 +37,13 @@ export class StreamAccumulator {
    *  default for some providers). Contains `prompt_tokens_details.cached_tokens`
    *  when prompt caching fires. */
   private _usage: unknown = null;
+  provider: string | null = null;
+  responseId: string | null = null;
 
   processChunk(chunk: OpenAI.Chat.Completions.ChatCompletionChunk): ProcessedStreamChunk {
+    const metadata = chunk as unknown as { provider?: unknown; id?: unknown };
+    if (typeof metadata.provider === "string") this.provider = metadata.provider;
+    if (typeof metadata.id === "string") this.responseId = metadata.id;
     // Some providers attach `usage` on the terminal chunk (choices may be empty).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chunkUsage = (chunk as any).usage;
@@ -49,6 +55,7 @@ export class StreamAccumulator {
     if (!choice) return {};
 
     const delta = choice.delta;
+    this.providerReasoning.ingest(delta);
     const result: ProcessedStreamChunk = {
       finishReason: (choice.finish_reason as StreamChunk["finishReason"]) ?? null,
     };
@@ -151,6 +158,8 @@ export class StreamAccumulator {
     return this.text;
   }
 
+  get accumulatedProviderReasoning() { return this.providerReasoning.snapshot(); }
+
   get accumulatedToolCalls(): AccumulatedToolCall[] {
     return [...this.toolCallMap.values()];
   }
@@ -209,11 +218,14 @@ export class StreamAccumulator {
 
   reset(): void {
     this.text = "";
+    this.providerReasoning.reset();
     this.inlineReasoningParser.reset();
     this.toolCallMap.clear();
     this.seenToolStart.clear();
     this.frozenIndices.clear();
     this.maxToolIndex = -1;
     this._usage = null;
+    this.provider = null;
+    this.responseId = null;
   }
 }

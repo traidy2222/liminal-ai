@@ -25,11 +25,12 @@ test("isEditStaleFailure detects mismatch patterns", () => {
   assert.equal(isEditStaleFailure("ENOENT: no such file"), false);
 });
 
-test("buildFileRevisionBatchNotice lists stale warning", () => {
+test("buildFileRevisionBatchNotice allows reuse after successful edits", () => {
   const msg = buildFileRevisionBatchNotice([{ path: "pkg/a.ts", rev: 1 }]);
   assert.match(msg, /FILE REVISION/);
   assert.match(msg, /pkg\/a\.ts/);
-  assert.match(msg, /STALE/);
+  assert.match(msg, /Reuse the known post-edit content/);
+  assert.doesNotMatch(msg,/Before the next edit_file|is STALE/);
 });
 
 test("buildEditStaleRecoveryMessage mentions grep", () => {

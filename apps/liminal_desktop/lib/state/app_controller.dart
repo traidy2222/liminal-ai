@@ -4,11 +4,15 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 
 import '../apps/app_window_manager.dart';
+import '../browser/browser_workspace.dart';
 import '../audio/dictation_controller.dart';
 import '../audio/sidecar_audio_client.dart';
 import '../audio/speech_output.dart';
+import '../audio/voice_timing.dart';
+import '../audio/wake_voice_controller.dart';
 import '../core/connection_keepalive.dart';
 import '../core/connection_phase.dart';
 import '../core/feature_flags.dart';
@@ -57,26 +61,62 @@ String _readHarnessEnvField(
 /// [SessionRegistry] so streaming turns do not rebuild the whole app tree.
 class AppController extends ChangeNotifier {
   AppController({this.repoRoot})
-      : _sidecar = SidecarLifecycle(repoRoot: repoRoot),
-        speechOutput = SpeechOutput(),
-        dictation = DictationController() {
+    : _sidecar = SidecarLifecycle(repoRoot: repoRoot),
+      speechOutput = SpeechOutput(),
+      dictation = DictationController() {
     _protocol.onGlobalFrame = _onGlobalFrame;
     _protocol.onChatFrame = _onChatFrame;
     _protocol.onConnectionLost = _onTransportDisconnect;
-    _sessions.onTurnSettled = (chatId) => unawaited(_flushPendingDictationSend(chatId));
+    _sessions.onTurnSettled = (chatId) =>
+        unawaited(_flushPendingDictationSend(chatId));
+    dictation.beforeStartSession = () => wakeVoice.stop();
     dictation.onSessionActiveChange = _onDictationSessionChange;
     dictation.onCaptureActiveChange = _onDictationCaptureChange;
-    dictation.shouldBlockSpeechCapture = () => speechOutput.shouldBlockMicCapture();
+    dictation.shouldBlockSpeechCapture = () =>
+        speechOutput.shouldBlockMicCapture();
     dictation.isTtsPipelineActive = () => speechOutput.isTtsPipelineActive;
     dictation.onBargeIn = speechOutput.interrupt;
     speechOutput.onPlaybackHoldChange = _applyTtsPlaybackHold;
+    speechOutput.onInterrupted = () {
+      final id = _speechChatId;
+      final voiceId = _speechVoiceId;
+      if (voiceId != null) {
+        _mutedVoiceIds.add(voiceId);
+        if (_mutedVoiceIds.length > 32)
+          _mutedVoiceIds.remove(_mutedVoiceIds.first);
+      }
+      if (id != null && _protocol.isConnected) {
+        unawaited(
+          _protocol
+              .send('cancel_speech', {
+                'chatId': id,
+                if (voiceId != null) 'voiceId': voiceId,
+              })
+              .then<void>((_) {})
+              .catchError((Object _) {}),
+        );
+      }
+    };
     speechOutput.onMicCaptureUnblocked = () {
+      if (wakeVoice.listening)
+        unawaited(wakeVoice.dictation.reconcileListening());
       if (dictationSessionActive) {
         unawaited(dictation.reconcileListening());
       }
     };
     speechOutput.addListener(notifyListeners);
     dictation.addListener(notifyListeners);
+    wakeVoice.addListener(_onWakeVoiceChanged);
+    wakeVoice.dictation.shouldBlockSpeechCapture = () =>
+        speechOutput.shouldBlockMicCapture();
+    wakeVoice.dictation.isTtsPipelineActive = () =>
+        speechOutput.isTtsPipelineActive;
+    wakeVoice.dictation.onBargeIn = speechOutput.interrupt;
+    wakeVoice.dictation.onCaptureActiveChange = (active) {
+      // Background amplitude alone is not a confirmed user interruption.
+      // Otherwise a keyboard click can mute/cancel a generated spoken reply.
+      speechOutput.setPauseWhenCapture(dictationCaptureActive);
+    };
     _appWindows.bindMainWindowHandler();
     updates = UpdateCoordinator(
       repoRoot: repoRoot,
@@ -86,7 +126,12 @@ class AppController extends ChangeNotifier {
     updates.addListener(notifyListeners);
     usage.addListener(notifyListeners);
     unawaited(usage.initialize());
+  }
 
+  Future<Map<String,dynamic>> manageProcedures(String chatId,String action,Map<String,dynamic> data) async {
+    final result=await _protocol.send('procedure_manage',{'chatId':chatId,'action':action,...data});
+    if(!result.ok)throw StateError(result.error??'Procedure request failed');
+    return Map<String,dynamic>.from(result.data as Map? ?? {});
   }
 
   late final UpdateCoordinator updates;
@@ -118,6 +163,7 @@ class AppController extends ChangeNotifier {
 
   ConnectionPhase phase = ConnectionPhase.idle;
   String? bootError;
+
   /// Short-lived banner after reconnect ("Back online").
   String? connectionNotice;
   bool connectionRecoverBusy = false;
@@ -147,7 +193,41 @@ class AppController extends ChangeNotifier {
   bool showRawHarness = false;
 
   final DictationController dictation;
+  late final WakeVoiceController wakeVoice = WakeVoiceController(
+    send: _sendWakeMessage,
+    onWake: (chatId) async {
+      unawaited(
+        SystemSound.play(SystemSoundType.click).catchError((Object _) {}),
+      );
+      unawaited(speechOutput.unlockAudio());
+      unawaited(
+        enterChatWorkspace(chatId).catchError((Object e) {
+          wakeVoice.reportError('Could not focus Mission Control: $e');
+        }),
+      );
+    },
+    onAwakeChanged: (chatId, awake) async {
+      if (!awake) speechOutput.interrupt();
+      if (!_protocol.isConnected) return;
+      final result = await _protocol.send('set_voice_session', {
+        'chatId': chatId,
+        'active': awake,
+      });
+      if (!result.ok && awake)
+        throw StateError(result.error ?? 'Voice session unavailable');
+    },
+    isBusy: (chatId) => _sessions.get(chatId)?.busy == true,
+    isPlaying: () => speechOutput.isTtsPipelineActive,
+  );
+  bool _wakeDisposed = false;
+  int _wakeSyncGeneration = 0;
+  Future<void> _wakeSyncChain = Future.value();
+  SidecarAudioClient? _wakeAudioClient;
   final SpeechOutput speechOutput;
+  String? _speechChatId;
+  String? _speechVoiceId;
+  final Set<String> _mutedVoiceIds = {};
+  bool _voiceFirstTextSeen = false;
   bool dictationSessionActive = false;
   bool dictationCaptureActive = false;
   String? dictationNotice;
@@ -169,11 +249,26 @@ class AppController extends ChangeNotifier {
   int get protocolVersion => _protocol.protocolVersion;
   String get sidecarVersion => _protocol.sidecarVersion;
 
-  String? activeChatId;
+  Future<Map<String, dynamic>?> loadCacheStats() async {
+    final result = await _protocol.send('get_cache_stats', {});
+    return result.ok && result.data is Map
+        ? Map<String, dynamic>.from(result.data as Map)
+        : null;
+  }
+
+  String? _activeChatId;
+  String? get activeChatId => _activeChatId;
+  set activeChatId(String? value) {
+    _activeChatId = value;
+    BrowserWorkspace.instance.setActiveChat(value);
+  }
+
   /// Chats shown in the main area (up to [maxVisibleChats] panes). [activeChatId] is focused.
   List<String> visibleChatIds = [];
+
   /// False on the Vireon hub; true while the chat workspace route is open.
   bool inChatWorkspace = false;
+
   /// Set by `LIMINAL_MARKETING_CAPTURE=1` when spawned from capture scripts.
   bool get marketingCaptureMode =>
       Platform.environment['LIMINAL_MARKETING_CAPTURE'] == '1';
@@ -201,7 +296,8 @@ class AppController extends ChangeNotifier {
   bool get needsPersonaBootstrap =>
       config != null && config!.personaBootstrapPending;
 
-  ChatSessionController sessionFor(String chatId) => _sessions.sessionFor(chatId);
+  ChatSessionController sessionFor(String chatId) =>
+      _sessions.sessionFor(chatId);
 
   ChatSessionController? get activeSession =>
       activeChatId != null ? _sessions.get(activeChatId!) : null;
@@ -239,6 +335,9 @@ class AppController extends ChangeNotifier {
       if (config == null) {
         await refreshConfig();
       }
+      // Start the application-level listener from transport readiness, not from
+      // entering a chat view or a later configuration refresh.
+      _scheduleWakeSync();
       notifyListeners();
     } catch (e) {
       _stopConnectionHealthMonitor();
@@ -265,10 +364,14 @@ class AppController extends ChangeNotifier {
     final ok = await _protocol.ping(timeout: connectionPingTimeout);
     if (!ok) {
       await _scheduleReconnect('ping failed on resume');
+    } else {
+      _recoverWakeListening();
     }
   }
 
   void _onTransportDisconnect(String reason) {
+    _wakeSyncGeneration++;
+    if (!_wakeDisposed) unawaited(wakeVoice.stop());
     _usageTurns.clear();
     if (phase == ConnectionPhase.booting || !_hasEverConnected) return;
     unawaited(_scheduleReconnect(reason));
@@ -289,8 +392,24 @@ class AppController extends ChangeNotifier {
     _missedConnectionPings = 0;
   }
 
+  void _recoverWakeListening() {
+    if (config?.wakeVoice.enabled != true ||
+        wakeVoice.paused ||
+        dictation.sessionActive ||
+        dictation.status == DictationStatus.permissionPending)
+      return;
+    if (!wakeVoice.listening &&
+        wakeVoice.dictation.status != DictationStatus.permissionPending &&
+        wakeVoice.dictation.status != DictationStatus.error) {
+      _scheduleWakeSync();
+    } else if (wakeVoice.listening) {
+      unawaited(wakeVoice.dictation.reconcileListening());
+    }
+  }
+
   Future<void> _connectionHealthTick() async {
-    if (phase != ConnectionPhase.connected && phase != ConnectionPhase.reconnecting) {
+    if (phase != ConnectionPhase.connected &&
+        phase != ConnectionPhase.reconnecting) {
       return;
     }
     if (_reconnectInFlight) return;
@@ -307,6 +426,7 @@ class AppController extends ChangeNotifier {
       return;
     }
     _missedConnectionPings = 0;
+    _recoverWakeListening();
   }
 
   Future<void> _scheduleReconnect(String reason) async {
@@ -361,6 +481,7 @@ class AppController extends ChangeNotifier {
           connectionNotice = 'Back online — chat history restored';
           _scheduleConnectionNoticeClear();
           _startConnectionHealthMonitor();
+          _scheduleWakeSync();
           notifyListeners();
           return;
         } catch (e) {
@@ -435,6 +556,100 @@ class AppController extends ChangeNotifier {
       maxRecordingMs: cfg.dictationMaxRecordingMs,
       audioCue: cfg.dictationAudioCue,
     );
+    _scheduleWakeSync();
+  }
+
+  void _scheduleWakeSync() {
+    final generation = ++_wakeSyncGeneration;
+    _wakeSyncChain = _wakeSyncChain
+        .catchError((Object _) {})
+        .then((_) async {
+          if (_wakeDisposed || generation != _wakeSyncGeneration) return;
+          final cfg = config;
+          if (cfg == null) return;
+          await wakeVoice.configure(cfg.wakeVoice);
+          if (!cfg.wakeVoice.enabled ||
+              dictation.sessionActive ||
+              dictation.status == DictationStatus.permissionPending ||
+              !_protocol.isConnected ||
+              wakeVoice.paused)
+            return;
+          // Chat navigation does not rebind an already-running global mic.
+          if (wakeVoice.listening &&
+              _wakeAudioClient?.port == _sidecarPort &&
+              _wakeAudioClient?.token == _sidecarToken)
+            return;
+          final result = await _protocol.send(
+            'get_or_create_orchestrator_chat',
+            {'activate': false},
+          );
+          if (_wakeDisposed ||
+              generation != _wakeSyncGeneration ||
+              dictation.sessionActive ||
+              dictation.status == DictationStatus.permissionPending)
+            return;
+          final chatId = result.data is Map
+              ? (result.data as Map)['chatId'] as String?
+              : null;
+          if (!result.ok ||
+              chatId == null ||
+              _sidecarPort == null ||
+              _sidecarToken == null) {
+            wakeVoice.reportError(
+              result.error ?? 'Mission Control is unavailable',
+            );
+            return;
+          }
+          _wakeAudioClient = SidecarAudioClient(
+            port: _sidecarPort!,
+            token: _sidecarToken!,
+            chatId: chatId,
+          );
+          await wakeVoice.start(_wakeAudioClient!);
+        })
+        .catchError((Object e) {
+          if (!_wakeDisposed) wakeVoice.reportError(e.toString());
+        });
+  }
+
+  void _onWakeVoiceChanged() {
+    _syncDictationAudioClient();
+    notifyListeners();
+  }
+
+  Future<void> toggleWakeListening() async {
+    if (wakeVoice.paused || !wakeVoice.listening) {
+      wakeVoice.resume();
+      _scheduleWakeSync();
+    } else {
+      await wakeVoice.pause();
+    }
+  }
+
+  Future<WakeSendResult> _sendWakeMessage(String chatId, String text) async {
+    if (!_protocol.isConnected || needsProviderSetup)
+      return const WakeSendResult(
+        error: 'Connect a model provider to use Mission Control.',
+      );
+    speechOutput.interrupt();
+    _voiceFirstTextSeen = false;
+    voiceTiming('command_send');
+    final result = await _protocol.send('send_message', {
+      'chatId': chatId,
+      'message': text,
+      'liveDictation': true,
+    });
+    voiceTiming('command_accepted', {'ok': result.ok});
+    if (!result.ok) {
+      return WakeSendResult(
+        busy: result.error?.toLowerCase().contains('agent is busy') == true,
+        error: result.error ?? 'Send not confirmed. Your request is retained.',
+      );
+    }
+    // A rejected/busy attempt must not create duplicate user bubbles on retry.
+    _sessions.sessionFor(chatId).applyUserMessage(text);
+    _usageTurns.begin(chatId);
+    return const WakeSendResult(accepted: true);
   }
 
   SidecarAudioClient? _audioClientForActiveChat() {
@@ -449,7 +664,11 @@ class AppController extends ChangeNotifier {
     final client = _audioClientForActiveChat();
     dictation.bindAudioClient(client);
     speechOutput.setClipFetcher(
-      client == null ? null : (url) => client.fetchTtsClip(url),
+      wakeVoice.awake && _wakeAudioClient != null
+          ? (url) => _wakeAudioClient!.fetchTtsClip(url)
+          : client == null
+          ? null
+          : (url) => client.fetchTtsClip(url),
     );
   }
 
@@ -459,6 +678,7 @@ class AppController extends ChangeNotifier {
       unawaited(speechOutput.unlockAudio());
     } else {
       speechOutput.flush();
+      _scheduleWakeSync();
     }
     notifyListeners();
   }
@@ -473,8 +693,11 @@ class AppController extends ChangeNotifier {
     _ttsHoldChain = _ttsHoldChain.then((_) async {
       if (hold) {
         await dictation.suspendForTts();
+        await wakeVoice.dictation.suspendForTts();
       } else {
         await dictation.resumeAfterTts();
+        await wakeVoice.dictation.resumeAfterTts();
+        if (wakeVoice.listening) await wakeVoice.dictation.reconcileListening();
         if (dictationSessionActive) {
           await dictation.reconcileListening();
         }
@@ -484,6 +707,14 @@ class AppController extends ChangeNotifier {
   }
 
   void _onChatFrame(String chatId, String event, Map<String, dynamic> data) {
+    if (chatId == wakeVoice.chatId &&
+        wakeVoice.awake &&
+        event == 'text' &&
+        data['channel'] == 'user' &&
+        !_voiceFirstTextSeen) {
+      _voiceFirstTextSeen = true;
+      voiceTiming('first_text');
+    }
     if (_usageTurns.observe(chatId, event, data)) {
       unawaited(usage.record(UsageMilestone.conversationCompleted));
     }
@@ -493,8 +724,10 @@ class AppController extends ChangeNotifier {
     if (chatId == activeChatId) {
       _syncAssetResolver(chatId: chatId);
     }
-    if (event == 'speech' && chatId == activeChatId && dictationSessionActive) {
-      _handleSpeechEvent(data);
+    if (event == 'speech' &&
+        ((chatId == activeChatId && dictationSessionActive) ||
+            (chatId == wakeVoice.chatId && wakeVoice.awake))) {
+      _handleSpeechEvent(data, chatId);
     }
     if (event == 'harness_running' && marketingCaptureMode) {
       if (!inChatWorkspace || activeChatId != chatId) {
@@ -518,6 +751,10 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     }
     _sessions.dispatch(chatId, event, data);
+    if (chatId == wakeVoice.chatId &&
+        (event == 'turn_end' || event == 'error')) {
+      unawaited(wakeVoice.drain());
+    }
     if (event == 'transcript_replay' && visibleChatIds.contains(chatId)) {
       notifyListeners();
     }
@@ -534,7 +771,15 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void _handleSpeechEvent(Map<String, dynamic> data) {
+  void _handleSpeechEvent(Map<String, dynamic> data, String chatId) {
+    final voiceId = data['voiceId'] as String?;
+    if (voiceId != null && _mutedVoiceIds.contains(voiceId)) return;
+    voiceTiming('clip_received', {
+      'clipId': data['clipId'],
+      'voiceId': voiceId,
+    });
+    _speechChatId = chatId;
+    _speechVoiceId = voiceId;
     final clipId = data['clipId'] as String? ?? '';
     final text = data['text'] as String? ?? '';
     final audioUrl = data['audioUrl'] as String? ?? '';
@@ -556,12 +801,14 @@ class AppController extends ChangeNotifier {
     if (trimmed.isEmpty) return 'Empty transcript — nothing to send.';
     final chatId = activeChatId;
     if (chatId == null) return 'Select a chat before sending.';
-    if (activeSession?.busy == true || _flushingDictation.contains(chatId) ||
+    if (activeSession?.busy == true ||
+        _flushingDictation.contains(chatId) ||
         _pendingDictationMessages[chatId]?.isNotEmpty == true) {
       _pendingDictationMessages.putIfAbsent(chatId, () => []).add(trimmed);
       dictationNotice = 'Agent busy — message queued.';
       notifyListeners();
-      if (activeSession?.busy != true) unawaited(_flushPendingDictationSend(chatId));
+      if (activeSession?.busy != true)
+        unawaited(_flushPendingDictationSend(chatId));
       return 'queued';
     }
     dictationNotice = null;
@@ -574,13 +821,17 @@ class AppController extends ChangeNotifier {
     final pending = _pendingDictationMessages[chatId];
     if (pending == null ||
         pending.isEmpty ||
-        _flushingDictation.contains(chatId)) return;
+        _flushingDictation.contains(chatId))
+      return;
     if (_sessions.get(chatId)?.busy == true) return;
     _flushingDictation.add(chatId);
     var delivered = false;
     try {
-      final ok =
-          await sendMessage(pending.first, chatId: chatId, liveDictation: true);
+      final ok = await sendMessage(
+        pending.first,
+        chatId: chatId,
+        liveDictation: true,
+      );
       if (ok) {
         delivered = true;
         pending.removeAt(0);
@@ -590,15 +841,17 @@ class AppController extends ChangeNotifier {
         dictationNotice = !ok
             ? 'Send failed — spoken message is still queued.'
             : pending.isEmpty
-                ? null
-                : 'Agent busy — message queued.';
+            ? null
+            : 'Agent busy — message queued.';
         notifyListeners();
       }
     } finally {
       _flushingDictation.remove(chatId);
       // A very fast turn can finish before its send acknowledgement resumes us.
       // Its settlement callback saw the in-flight guard; drain the next item now.
-      if (delivered && pending.isNotEmpty && _sessions.get(chatId)?.busy != true) {
+      if (delivered &&
+          pending.isNotEmpty &&
+          _sessions.get(chatId)?.busy != true) {
         unawaited(_flushPendingDictationSend(chatId));
       }
     }
@@ -668,11 +921,9 @@ class AppController extends ChangeNotifier {
     vireonAuthError = null;
     notifyListeners();
     try {
-      final result = await _protocol.send(
-        'vireon_sign_in',
-        {'openBrowser': true},
-        timeout: const Duration(minutes: 6),
-      );
+      final result = await _protocol.send('vireon_sign_in', {
+        'openBrowser': true,
+      }, timeout: const Duration(minutes: 6));
       if (!result.ok) {
         vireonAuthError = result.error ?? 'Sign-in failed';
         return false;
@@ -768,21 +1019,34 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<List<OpenRouterCatalogModel>> loadOpenRouterModels(bool refresh) async {
-    final result = await _protocol.send('get_openrouter_models', {'refresh': refresh}, timeout: const Duration(seconds: 20));
-    if (!result.ok || result.data is! Map) throw StateError(result.error ?? 'Model catalog unavailable');
+  Future<List<OpenRouterCatalogModel>> loadOpenRouterModels(
+    bool refresh,
+  ) async {
+    final result = await _protocol.send('get_openrouter_models', {
+      'refresh': refresh,
+    }, timeout: const Duration(seconds: 20));
+    if (!result.ok || result.data is! Map)
+      throw StateError(result.error ?? 'Model catalog unavailable');
     final rows = (result.data as Map)['models'] as List? ?? [];
-    return rows.map((r) => OpenRouterCatalogModel.fromJson(Map<String, dynamic>.from(r as Map))).toList();
+    return rows
+        .map(
+          (r) => OpenRouterCatalogModel.fromJson(
+            Map<String, dynamic>.from(r as Map),
+          ),
+        )
+        .toList();
   }
 
   Future<void> loadManagedInferenceModels() async {
     final snap = harnessSettings;
-    final mode = (snap?.provider.inferenceMode?.trim().isNotEmpty == true
-            ? snap!.provider.inferenceMode!
-            : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto'))
-        .trim()
-        .toLowerCase();
-    final showManaged = _protocol.isConnected && vireonAccount.connected && mode != 'byok';
+    final mode =
+        (snap?.provider.inferenceMode?.trim().isNotEmpty == true
+                ? snap!.provider.inferenceMode!
+                : _readHarnessEnvField(snap, 'AGENT_INFERENCE_MODE', 'auto'))
+            .trim()
+            .toLowerCase();
+    final showManaged =
+        _protocol.isConnected && vireonAccount.connected && mode != 'byok';
     if (!showManaged) {
       managedInferenceModels = null;
       managedInferenceModelsError = null;
@@ -794,18 +1058,17 @@ class AppController extends ChangeNotifier {
     managedInferenceModelsError = null;
     notifyListeners();
     try {
-      final result = await _protocol.send(
-        'get_vireon_inference_models',
-        const {'refresh': true},
-        timeout: const Duration(seconds: 45),
-      );
+      final result = await _protocol.send('get_vireon_inference_models', const {
+        'refresh': true,
+      }, timeout: const Duration(seconds: 45));
       if (result.ok && result.data is Map) {
         managedInferenceModels = ManagedInferenceModelsCatalog.fromJson(
           Map<String, dynamic>.from(result.data! as Map),
         );
       } else {
         managedInferenceModels = null;
-        managedInferenceModelsError = result.error ?? 'Failed to load managed models';
+        managedInferenceModelsError =
+            result.error ?? 'Failed to load managed models';
       }
     } catch (e) {
       managedInferenceModels = null;
@@ -899,7 +1162,9 @@ class AppController extends ChangeNotifier {
       if (preset.harnessEnvPatch != null) ...preset.harnessEnvPatch!,
     };
     for (final entry in merge.entries) {
-      final locked = snap.fields.any((f) => f.key == entry.key && f.lockedByEnv);
+      final locked = snap.fields.any(
+        (f) => f.key == entry.key && f.lockedByEnv,
+      );
       if (locked) continue;
       envPatch[entry.key] = entry.value;
     }
@@ -907,9 +1172,7 @@ class AppController extends ChangeNotifier {
     final result = await _protocol.send('update_settings', {
       'patch': {
         'harness': {'env': envPatch},
-        'provider': {
-          'model': preset.main,
-        },
+        'provider': {'model': preset.main},
       },
     });
     if (result.ok) {
@@ -948,7 +1211,9 @@ class AppController extends ChangeNotifier {
       merge['AGENT_API_BASE_URL'] = preset.baseURL;
     }
     for (final entry in merge.entries) {
-      final locked = snap.fields.any((f) => f.key == entry.key && f.lockedByEnv);
+      final locked = snap.fields.any(
+        (f) => f.key == entry.key && f.lockedByEnv,
+      );
       if (locked) continue;
       envPatch[entry.key] = entry.value;
     }
@@ -956,10 +1221,7 @@ class AppController extends ChangeNotifier {
     final result = await _protocol.send('update_settings', {
       'patch': {
         'harness': {'env': envPatch},
-        'provider': {
-          'model': preset.model,
-          'baseURL': preset.baseURL,
-        },
+        'provider': {'model': preset.model, 'baseURL': preset.baseURL},
       },
     });
     if (result.ok) {
@@ -990,7 +1252,8 @@ class AppController extends ChangeNotifier {
     final body = <String, dynamic>{
       if (apiKey.trim().isNotEmpty) 'apiKey': apiKey.trim(),
       if (model != null && model.trim().isNotEmpty) 'model': model.trim(),
-      if (baseUrl != null && baseUrl.trim().isNotEmpty) 'baseURL': baseUrl.trim(),
+      if (baseUrl != null && baseUrl.trim().isNotEmpty)
+        'baseURL': baseUrl.trim(),
     };
     final result = await _protocol.send('save_provider', body);
     setupSaving = false;
@@ -1008,21 +1271,32 @@ class AppController extends ChangeNotifier {
     return true;
   }
 
+  Future<List<Map<String, dynamic>>> discoverProviderModels({
+    required String baseUrl,
+    String apiKey = '',
+  }) async {
+    final result = await _protocol.send('discover_provider_models', {
+      'baseURL': baseUrl,
+      'apiKey': apiKey,
+    }, timeout: const Duration(seconds: 20));
+    if (!result.ok) throw Exception(result.error ?? 'Could not load models');
+    final data = Map<String, dynamic>.from(result.data as Map);
+    return (data['models'] as List)
+        .map((m) => Map<String, dynamic>.from(m as Map))
+        .toList();
+  }
+
   Future<bool> submitPersonaBootstrap(String input, {bool skip = false}) async {
     final chatId = activeChatId;
     if (!_protocol.isConnected || chatId == null) return false;
     setupSaving = true;
     setupError = null;
     notifyListeners();
-    final result = await _protocol.send(
-      'submit_persona_bootstrap',
-      {
-        'chatId': chatId,
-        'input': input,
-        if (skip) 'skip': true,
-      },
-      timeout: const Duration(minutes: 5),
-    );
+    final result = await _protocol.send('submit_persona_bootstrap', {
+      'chatId': chatId,
+      'input': input,
+      if (skip) 'skip': true,
+    }, timeout: const Duration(minutes: 5));
     setupSaving = false;
     if (!result.ok) {
       setupError = result.error ?? 'Persona setup failed';
@@ -1036,6 +1310,13 @@ class AppController extends ChangeNotifier {
     }
     notifyListeners();
     return true;
+  }
+
+  Future<void> cancelPersonaBootstrap() async {
+    if (activeChatId != null)
+      await _protocol.send('cancel_persona_bootstrap', {
+        'chatId': activeChatId,
+      });
   }
 
   void _onGlobalFrame(ServerFrame frame) {
@@ -1071,12 +1352,16 @@ class AppController extends ChangeNotifier {
         if (!LiminalFeatureFlags.desktopAppsEnabled) return;
         final appJson = frame.data['app'];
         if (appJson is Map) {
-          final spec = LiminalAppSpec.fromJson(Map<String, dynamic>.from(appJson));
+          final spec = LiminalAppSpec.fromJson(
+            Map<String, dynamic>.from(appJson),
+          );
           _upsertDesktopApp(spec);
           if (spec.autoOpen && !_appWindows.isOpen(spec.id)) {
-            unawaited(_appWindows.openWindow(spec).then((_) {
-              unawaited(_remoteDesktop.registerSubWindow(spec.id));
-            }));
+            unawaited(
+              _appWindows.openWindow(spec).then((_) {
+                unawaited(_remoteDesktop.registerSubWindow(spec.id));
+              }),
+            );
           }
         }
         notifyListeners();
@@ -1092,19 +1377,22 @@ class AppController extends ChangeNotifier {
         if (!LiminalFeatureFlags.desktopAppsEnabled) return;
         final updatedJson = frame.data['app'];
         if (updatedJson is Map) {
-          final spec = LiminalAppSpec.fromJson(Map<String, dynamic>.from(updatedJson));
+          final spec = LiminalAppSpec.fromJson(
+            Map<String, dynamic>.from(updatedJson),
+          );
           _upsertDesktopApp(spec);
         }
         notifyListeners();
         return;
-      case 'pty_exit': {
-        final chatId = frame.chatId ?? frame.data['chatId'] as String?;
-        final sessionId = frame.data['sessionId'] as String?;
-        if (chatId == null || sessionId == null) return;
-        _sessions.get(chatId)?.removeTerminalTab(sessionId);
-        notifyListeners();
-        return;
-      }
+      case 'pty_exit':
+        {
+          final chatId = frame.chatId ?? frame.data['chatId'] as String?;
+          final sessionId = frame.data['sessionId'] as String?;
+          if (chatId == null || sessionId == null) return;
+          _sessions.get(chatId)?.removeTerminalTab(sessionId);
+          notifyListeners();
+          return;
+        }
       case 'app_closed':
         if (!LiminalFeatureFlags.desktopAppsEnabled) return;
         final appId = frame.data['appId'] as String? ?? '';
@@ -1122,7 +1410,9 @@ class AppController extends ChangeNotifier {
         final appId = frame.data['appId'] as String? ?? '';
         final cacheJson = frame.data['cache'];
         if (appId.isNotEmpty && cacheJson is Map) {
-          final cache = AppCacheEntry.fromJson(Map<String, dynamic>.from(cacheJson));
+          final cache = AppCacheEntry.fromJson(
+            Map<String, dynamic>.from(cacheJson),
+          );
           desktopAppCaches[appId] = cache;
           _appWindows.updateCache(appId, cache);
         }
@@ -1133,9 +1423,7 @@ class AppController extends ChangeNotifier {
         chats = _parseChats(frame.data['chats']);
         _pruneVisibleChats();
         _ensureVisibleInitialized();
-        if (marketingCaptureMode &&
-            activeChatId != null &&
-            !inChatWorkspace) {
+        if (marketingCaptureMode && activeChatId != null && !inChatWorkspace) {
           unawaited(enterChatWorkspace(activeChatId!));
         }
         _syncAssetResolver();
@@ -1168,35 +1456,37 @@ class AppController extends ChangeNotifier {
         inboxScanBusy = true;
         notifyListeners();
         return;
-      case 'inbox_watch_skipped': {
-        final run = frame.data['run'];
-        if (run is Map) {
-          inboxLastScanMessage = InboxWatchRun.fromJson(
-            Map<String, dynamic>.from(run),
-          ).summary;
-        } else {
-          inboxLastScanMessage = frame.data['reason'] as String?;
+      case 'inbox_watch_skipped':
+        {
+          final run = frame.data['run'];
+          if (run is Map) {
+            inboxLastScanMessage = InboxWatchRun.fromJson(
+              Map<String, dynamic>.from(run),
+            ).summary;
+          } else {
+            inboxLastScanMessage = frame.data['reason'] as String?;
+          }
+          inboxScanBusy = false;
+          unawaited(loadInboxStatus());
+          notifyListeners();
+          return;
         }
-        inboxScanBusy = false;
-        unawaited(loadInboxStatus());
-        notifyListeners();
-        return;
-      }
       case 'inbox_notify':
         inboxToastMessage = frame.data['message'] as String?;
         notifyListeners();
         return;
-      case 'inbox_watch_completed': {
-        final run = frame.data['run'];
-        if (run is Map) {
-          inboxLastScanMessage = InboxWatchRun.fromJson(
-            Map<String, dynamic>.from(run),
-          ).summary;
+      case 'inbox_watch_completed':
+        {
+          final run = frame.data['run'];
+          if (run is Map) {
+            inboxLastScanMessage = InboxWatchRun.fromJson(
+              Map<String, dynamic>.from(run),
+            ).summary;
+          }
+          inboxScanBusy = false;
+          unawaited(loadInboxStatus());
+          return;
         }
-        inboxScanBusy = false;
-        unawaited(loadInboxStatus());
-        return;
-      }
       default:
         return;
     }
@@ -1223,7 +1513,9 @@ class AppController extends ChangeNotifier {
   Future<void> _ensureTranscriptReplayed(String chatId) async {
     final session = _sessions.get(chatId);
     if (session != null && session.messages.isNotEmpty) return;
-    final result = await _protocol.send('replay_transcript', {'chatId': chatId});
+    final result = await _protocol.send('replay_transcript', {
+      'chatId': chatId,
+    });
     if (result.ok) notifyListeners();
   }
 
@@ -1248,9 +1540,9 @@ class AppController extends ChangeNotifier {
       }
     }
     if (active == null) return;
-          config = config!.copyWith(
-            personaBootstrapPending: active.awaitingPersonaBootstrap,
-          );
+    config = config!.copyWith(
+      personaBootstrapPending: active.awaitingPersonaBootstrap,
+    );
   }
 
   List<ChatSummary> _parseChats(dynamic raw) {
@@ -1287,10 +1579,9 @@ class AppController extends ChangeNotifier {
     final previews = [
       for (final a in attachments) UserAttachmentPreview(name: a.name),
     ];
-    _sessions.sessionFor(targetChatId).applyUserMessage(
-      trimmed,
-      attachmentPreviews: previews,
-    );
+    _sessions
+        .sessionFor(targetChatId)
+        .applyUserMessage(trimmed, attachmentPreviews: previews);
     _usageTurns.begin(targetChatId);
     final result = await _protocol.send('send_message', {
       'chatId': targetChatId,
@@ -1303,9 +1594,9 @@ class AppController extends ChangeNotifier {
     });
     if (!result.ok) {
       _usageTurns.cancel(targetChatId);
-      _sessions.sessionFor(targetChatId).setConnectionError(
-        result.error ?? 'send_message failed',
-      );
+      _sessions
+          .sessionFor(targetChatId)
+          .setConnectionError(result.error ?? 'send_message failed');
       return false;
     }
     return true;
@@ -1419,8 +1710,7 @@ class AppController extends ChangeNotifier {
     String? reason,
   }) async {
     final targetChatId = chatId ?? activeChatId;
-    final session =
-        targetChatId != null ? _sessions.get(targetChatId) : null;
+    final session = targetChatId != null ? _sessions.get(targetChatId) : null;
     final pending = session?.pendingApproval;
     if (targetChatId == null || !_protocol.isConnected || pending == null) {
       return;
@@ -1450,10 +1740,7 @@ class AppController extends ChangeNotifier {
   Future<void> resolveAskUser(String answer, {String? chatId}) async {
     final id = chatId ?? activeChatId;
     if (id == null || !_protocol.isConnected) return;
-    await _protocol.send('resolve_ask_user', {
-      'chatId': id,
-      'answer': answer,
-    });
+    await _protocol.send('resolve_ask_user', {'chatId': id, 'answer': answer});
     _sessions.get(id)?.applyServerEvent('ask_user_answered', {});
   }
 
@@ -1632,11 +1919,16 @@ class AppController extends ChangeNotifier {
 
   void _startIntegrationsPolling() {
     _integrationsPollTimer?.cancel();
-    _integrationsPollTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      unawaited(_refreshIntegrationsFromServer().then((ok) {
-        if (ok) notifyListeners();
-      }));
-    });
+    _integrationsPollTimer = Timer.periodic(
+      const Duration(milliseconds: 1500),
+      (_) {
+        unawaited(
+          _refreshIntegrationsFromServer().then((ok) {
+            if (ok) notifyListeners();
+          }),
+        );
+      },
+    );
   }
 
   void _stopIntegrationsPolling() {
@@ -1695,22 +1987,20 @@ class AppController extends ChangeNotifier {
     List<String>? services,
     String mode = 'read_write',
     bool attach = true,
-  }) =>
-      _runIntegrationCommand('connect_google_oauth', {
-        if (services != null) 'services': services,
-        'mode': mode,
-        'openBrowser': true,
-        if (!attach) 'attach': false,
-      });
+  }) => _runIntegrationCommand('connect_google_oauth', {
+    if (services != null) 'services': services,
+    'mode': mode,
+    'openBrowser': true,
+    if (!attach) 'attach': false,
+  });
 
   Future<bool> connectGoogleWorkspace({
     List<String>? services,
     String mode = 'read_write',
-  }) =>
-      _runIntegrationCommand('connect_google_workspace', {
-        if (services != null) 'services': services,
-        'mode': mode,
-      });
+  }) => _runIntegrationCommand('connect_google_workspace', {
+    if (services != null) 'services': services,
+    'mode': mode,
+  });
 
   Future<bool> disconnectGoogle({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_google', {'revoke': revoke});
@@ -1719,22 +2009,20 @@ class AppController extends ChangeNotifier {
     List<String>? services,
     String mode = 'read_write',
     bool attach = true,
-  }) =>
-      _runIntegrationCommand('connect_microsoft_oauth', {
-        if (services != null) 'services': services,
-        'mode': mode,
-        'openBrowser': true,
-        if (!attach) 'attach': false,
-      });
+  }) => _runIntegrationCommand('connect_microsoft_oauth', {
+    if (services != null) 'services': services,
+    'mode': mode,
+    'openBrowser': true,
+    if (!attach) 'attach': false,
+  });
 
   Future<bool> connectMicrosoft365({
     List<String>? services,
     String mode = 'read_write',
-  }) =>
-      _runIntegrationCommand('connect_microsoft_365', {
-        if (services != null) 'services': services,
-        'mode': mode,
-      });
+  }) => _runIntegrationCommand('connect_microsoft_365', {
+    if (services != null) 'services': services,
+    'mode': mode,
+  });
 
   Future<bool> disconnectMicrosoft({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_microsoft', {'revoke': revoke});
@@ -1743,33 +2031,30 @@ class AppController extends ChangeNotifier {
     List<String>? services,
     String mode = 'read_write',
     bool attach = true,
-  }) =>
-      _runIntegrationCommand('connect_azure_oauth', {
-        if (services != null) 'services': services,
-        'mode': mode,
-        'openBrowser': true,
-        if (!attach) 'attach': false,
-      });
+  }) => _runIntegrationCommand('connect_azure_oauth', {
+    if (services != null) 'services': services,
+    'mode': mode,
+    'openBrowser': true,
+    if (!attach) 'attach': false,
+  });
 
   Future<bool> connectAzure({
     List<String>? services,
     String mode = 'read_write',
-  }) =>
-      _runIntegrationCommand('connect_azure', {
-        if (services != null) 'services': services,
-        'mode': mode,
-      });
+  }) => _runIntegrationCommand('connect_azure', {
+    if (services != null) 'services': services,
+    'mode': mode,
+  });
 
   Future<bool> connectAws({
     List<String>? services,
     String mode = 'read_write',
     String? profile,
-  }) =>
-      _runIntegrationCommand('connect_aws', {
-        if (services != null) 'services': services,
-        'mode': mode,
-        if (profile != null) 'profile': profile,
-      });
+  }) => _runIntegrationCommand('connect_aws', {
+    if (services != null) 'services': services,
+    'mode': mode,
+    if (profile != null) 'profile': profile,
+  });
 
   IntegrationServiceCard? _findServiceCard(String vendor, String serviceId) {
     final list = switch (vendor) {
@@ -1806,20 +2091,20 @@ class AppController extends ChangeNotifier {
     if (card == null || !card.signedIn || card.needsScopeReconnect) {
       final ok = switch (vendor) {
         'google' => await connectGoogleOAuth(
-            services: [serviceId],
-            mode: mode,
-            attach: true,
-          ),
+          services: [serviceId],
+          mode: mode,
+          attach: true,
+        ),
         'microsoft' => await connectMicrosoftOAuth(
-            services: [serviceId],
-            mode: mode,
-            attach: true,
-          ),
+          services: [serviceId],
+          mode: mode,
+          attach: true,
+        ),
         'azure' => await connectAzureOAuth(
-            services: [serviceId],
-            mode: mode,
-            attach: true,
-          ),
+          services: [serviceId],
+          mode: mode,
+          attach: true,
+        ),
         _ => false,
       };
       if (!ok) return false;
@@ -1841,19 +2126,20 @@ class AppController extends ChangeNotifier {
       _runIntegrationCommand('disconnect_azure', {'revoke': revoke});
 
   Future<bool> disconnectAws({bool clearIdentity = false}) =>
-      _runIntegrationCommand('disconnect_aws', {'clearIdentity': clearIdentity});
+      _runIntegrationCommand('disconnect_aws', {
+        'clearIdentity': clearIdentity,
+      });
 
   Future<bool> connectXeroOAuth({
     String mode = 'read_write',
     bool extended = false,
     bool fullScopes = false,
-  }) =>
-      _runIntegrationCommand('connect_xero_oauth', {
-        'mode': mode,
-        'extended': extended,
-        'fullScopes': fullScopes,
-        'openBrowser': true,
-      });
+  }) => _runIntegrationCommand('connect_xero_oauth', {
+    'mode': mode,
+    'extended': extended,
+    'fullScopes': fullScopes,
+    'openBrowser': true,
+  });
 
   Future<bool> disconnectXero({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_xero', {'revoke': revoke});
@@ -1888,12 +2174,11 @@ class AppController extends ChangeNotifier {
   Future<bool> connectYoutubeOAuth({
     String mode = 'read_write',
     bool monetary = false,
-  }) =>
-      _runIntegrationCommand('connect_youtube_oauth', {
-        'mode': mode,
-        'monetary': monetary,
-        'openBrowser': true,
-      });
+  }) => _runIntegrationCommand('connect_youtube_oauth', {
+    'mode': mode,
+    'monetary': monetary,
+    'openBrowser': true,
+  });
 
   Future<bool> disconnectYoutube({bool revoke = false}) =>
       _runIntegrationCommand('disconnect_youtube', {'revoke': revoke});
@@ -1901,21 +2186,19 @@ class AppController extends ChangeNotifier {
   Future<bool> revokeIntegrationAccount({
     required String provider,
     required String accountId,
-  }) =>
-      _runIntegrationCommand('revoke_integration_account', {
-        'provider': provider,
-        'accountId': accountId,
-      });
+  }) => _runIntegrationCommand('revoke_integration_account', {
+    'provider': provider,
+    'accountId': accountId,
+  });
 
   Future<bool> connectGithubOAuth({
     String mode = 'read_write',
     bool attach = true,
-  }) =>
-      _runIntegrationCommand('connect_github_oauth', {
-        'mode': mode,
-        'openBrowser': true,
-        if (!attach) 'attach': false,
-      });
+  }) => _runIntegrationCommand('connect_github_oauth', {
+    'mode': mode,
+    'openBrowser': true,
+    if (!attach) 'attach': false,
+  });
 
   Future<bool> connectGithub({String mode = 'read_write'}) =>
       _runIntegrationCommand('connect_github', {'mode': mode});
@@ -1938,13 +2221,12 @@ class AppController extends ChangeNotifier {
     String authKind = 'none',
     String authEnv = '',
     String authHeader = 'Authorization',
-  }) =>
-      _runIntegrationCommand('attach_integration_mcp', {
-        'name': name,
-        'url': url,
-        'read_only': readOnly,
-        'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
-      });
+  }) => _runIntegrationCommand('attach_integration_mcp', {
+    'name': name,
+    'url': url,
+    'read_only': readOnly,
+    'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
+  });
 
   Future<bool> detachIntegrationMcp(String name) =>
       _runIntegrationCommand('detach_integration_mcp', {'name': name});
@@ -1956,13 +2238,12 @@ class AppController extends ChangeNotifier {
     String authKind = 'bearer',
     String authEnv = '',
     String authHeader = 'X-Api-Key',
-  }) =>
-      _runIntegrationCommand('connect_integration_openapi', {
-        'name': name,
-        'specUrl': specUrl,
-        if (baseUrl.isNotEmpty) 'baseUrl': baseUrl,
-        'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
-      });
+  }) => _runIntegrationCommand('connect_integration_openapi', {
+    'name': name,
+    'specUrl': specUrl,
+    if (baseUrl.isNotEmpty) 'baseUrl': baseUrl,
+    'auth': _integrationAuthPayload(authKind, authEnv, authHeader),
+  });
 
   Future<bool> disconnectIntegrationOpenApi(String name) =>
       _runIntegrationCommand('disconnect_integration_openapi', {'name': name});
@@ -1973,19 +2254,32 @@ class AppController extends ChangeNotifier {
     void push(String label, bool connected, String who) {
       if (connected) parts.add('$label: $who');
     }
-    final g = snap.google.accounts.isNotEmpty ? snap.google.accounts.first : null;
+
+    final g = snap.google.accounts.isNotEmpty
+        ? snap.google.accounts.first
+        : null;
     push('Google', g != null, g?.email ?? g?.accountId ?? '');
-    final ms = snap.microsoft.accounts.isNotEmpty ? snap.microsoft.accounts.first : null;
+    final ms = snap.microsoft.accounts.isNotEmpty
+        ? snap.microsoft.accounts.first
+        : null;
     push('Microsoft', ms != null, ms?.email ?? ms?.accountId ?? '');
     final x = snap.xero.accounts.isNotEmpty ? snap.xero.accounts.first : null;
     push('Xero', x != null, x?.tenantName ?? x?.email ?? x?.accountId ?? '');
-    final sl = snap.slack.accounts.isNotEmpty ? snap.slack.accounts.first : null;
+    final sl = snap.slack.accounts.isNotEmpty
+        ? snap.slack.accounts.first
+        : null;
     push('Slack', sl != null, sl?.teamName ?? sl?.email ?? '');
-    final ln = snap.linear.accounts.isNotEmpty ? snap.linear.accounts.first : null;
+    final ln = snap.linear.accounts.isNotEmpty
+        ? snap.linear.accounts.first
+        : null;
     push('Linear', ln != null, ln?.organizationName ?? ln?.email ?? '');
-    final no = snap.notion.accounts.isNotEmpty ? snap.notion.accounts.first : null;
+    final no = snap.notion.accounts.isNotEmpty
+        ? snap.notion.accounts.first
+        : null;
     push('Notion', no != null, no?.workspaceName ?? no?.email ?? '');
-    final gh = snap.github.accounts.isNotEmpty ? snap.github.accounts.first : null;
+    final gh = snap.github.accounts.isNotEmpty
+        ? snap.github.accounts.first
+        : null;
     push('GitHub', gh != null, gh?.login ?? gh?.email ?? '');
     if (parts.isEmpty) {
       return 'No integrations connected. Try /connect xero';
@@ -2010,12 +2304,30 @@ class AppController extends ChangeNotifier {
         await abortTurn();
         return ComposerSlashOutcome.abort();
       case SlashCommandKind.workflowManage:
-        if (parsed.command == 'resume-work' && !RegExp(r'^[a-f0-9-]{36}$',caseSensitive:false).hasMatch(parsed.note)) return ComposerSlashOutcome.message('Use /workflows, then /resume-work <run-id>.', clearInput:false);
-        return ComposerSlashOutcome.send(text:parsed.raw);
+        if (parsed.command == 'resume-work' &&
+            !RegExp(
+              r'^[a-f0-9-]{36}$',
+              caseSensitive: false,
+            ).hasMatch(parsed.note))
+          return ComposerSlashOutcome.message(
+            'Use /workflows, then /resume-work <run-id>.',
+            clearInput: false,
+          );
+        return ComposerSlashOutcome.send(text: parsed.raw);
       case SlashCommandKind.signatureWorkflow:
-        if (parsed.note.trim().isEmpty) return ComposerSlashOutcome.message(
-          parsed.command == 'proposal' ? 'Add the client enquiry and scope after /proposal.' : 'Add the bug report and expected behaviour after /fix.', clearInput: false);
-        return ComposerSlashOutcome.send(text: parsed.note.trim(), workflowPreset: parsed.command == 'proposal' ? 'enquiry_to_proposal' : 'bugfix_to_handoff');
+        if (parsed.note.trim().isEmpty)
+          return ComposerSlashOutcome.message(
+            parsed.command == 'proposal'
+                ? 'Add the client enquiry and scope after /proposal.'
+                : 'Add the bug report and expected behaviour after /fix.',
+            clearInput: false,
+          );
+        return ComposerSlashOutcome.send(
+          text: parsed.note.trim(),
+          workflowPreset: parsed.command == 'proposal'
+              ? 'enquiry_to_proposal'
+              : 'bugfix_to_handoff',
+        );
       case SlashCommandKind.receiptWorkflow:
         if (attachmentCount == 0) {
           return ComposerSlashOutcome.message(
@@ -2033,7 +2345,10 @@ class AppController extends ChangeNotifier {
       case SlashCommandKind.attach:
         final path = parsed.args.isNotEmpty ? parsed.args.first.trim() : '';
         if (path.isEmpty) {
-          return ComposerSlashOutcome.message('Usage: /attach <image-path>', clearInput: false);
+          return ComposerSlashOutcome.message(
+            'Usage: /attach <image-path>',
+            clearInput: false,
+          );
         }
         return ComposerSlashOutcome.attachPath(path);
       case SlashCommandKind.connect:
@@ -2058,10 +2373,16 @@ class AppController extends ChangeNotifier {
           _ => false,
         };
         if (!ok && integrationsError != null) {
-          return ComposerSlashOutcome.message(integrationsError!, clearInput: false);
+          return ComposerSlashOutcome.message(
+            integrationsError!,
+            clearInput: false,
+          );
         }
         if (!ok) {
-          return ComposerSlashOutcome.message('Connect failed for $provider', clearInput: false);
+          return ComposerSlashOutcome.message(
+            'Connect failed for $provider',
+            clearInput: false,
+          );
         }
         return ComposerSlashOutcome.message(
           '$provider: complete sign-in in the browser tab',
@@ -2087,7 +2408,10 @@ class AppController extends ChangeNotifier {
           _ => false,
         };
         if (!ok && integrationsError != null) {
-          return ComposerSlashOutcome.message(integrationsError!, clearInput: false);
+          return ComposerSlashOutcome.message(
+            integrationsError!,
+            clearInput: false,
+          );
         }
         return ComposerSlashOutcome.message(
           ok ? '$provider: disconnected' : 'Disconnect failed for $provider',
@@ -2098,7 +2422,9 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<ComposerSlashOutcome> _handleRemoteSlash(ParsedComposerSlash parsed) async {
+  Future<ComposerSlashOutcome> _handleRemoteSlash(
+    ParsedComposerSlash parsed,
+  ) async {
     if (!_protocol.isConnected) {
       return ComposerSlashOutcome.message('Not connected to sidecar.');
     }
@@ -2108,7 +2434,10 @@ class AppController extends ChangeNotifier {
     }
     final remote = parsed.remote;
     if (remote == null) {
-      return ComposerSlashOutcome.message('Invalid /remote usage.', clearInput: false);
+      return ComposerSlashOutcome.message(
+        'Invalid /remote usage.',
+        clearInput: false,
+      );
     }
     switch (remote.action) {
       case RemoteSlashAction.enable:
@@ -2138,30 +2467,45 @@ class AppController extends ChangeNotifier {
             'Expires: ${DateTime.fromMillisecondsSinceEpoch(expiresAt).toLocal()}',
           if (lanUrl != null && lanUrl.isNotEmpty) 'LAN: $lanUrl',
           if (cloudUrl != null && cloudUrl.isNotEmpty) 'Cloud: $cloudUrl',
-          if ((lanUrl == null || lanUrl.isEmpty) && (cloudUrl == null || cloudUrl.isEmpty))
+          if ((lanUrl == null || lanUrl.isEmpty) &&
+              (cloudUrl == null || cloudUrl.isEmpty))
             'No LAN URL — check Wi‑Fi and LIMINAL_REMOTE_BIND_HOST.',
           'Use /remote off to revoke.',
         ];
         return ComposerSlashOutcome.message(lines.join('\n'));
       case RemoteSlashAction.disable:
-        final result = await _protocol.send('remote_disable', {'chatId': chatId});
+        final result = await _protocol.send('remote_disable', {
+          'chatId': chatId,
+        });
         if (!result.ok) {
-          return ComposerSlashOutcome.message(result.error ?? 'Remote disable failed', clearInput: false);
+          return ComposerSlashOutcome.message(
+            result.error ?? 'Remote disable failed',
+            clearInput: false,
+          );
         }
         final removed =
-            ((result.data as Map<String, dynamic>?)?['removed'] as num?)?.toInt() ?? 0;
+            ((result.data as Map<String, dynamic>?)?['removed'] as num?)
+                ?.toInt() ??
+            0;
         return ComposerSlashOutcome.message(
           removed > 0 ? 'Remote access revoked.' : 'No active remote session.',
         );
       case RemoteSlashAction.status:
-        final result = await _protocol.send('remote_status', {'chatId': chatId});
+        final result = await _protocol.send('remote_status', {
+          'chatId': chatId,
+        });
         if (!result.ok) {
-          return ComposerSlashOutcome.message(result.error ?? 'Remote status failed', clearInput: false);
+          return ComposerSlashOutcome.message(
+            result.error ?? 'Remote status failed',
+            clearInput: false,
+          );
         }
         final data = (result.data as Map<String, dynamic>?) ?? {};
         final active = data['active'] as bool? ?? false;
         if (!active) {
-          return ComposerSlashOutcome.message('Remote access is off for this chat.');
+          return ComposerSlashOutcome.message(
+            'Remote access is off for this chat.',
+          );
         }
         final buf = StringBuffer('Remote session active:\n');
         final lan = data['lanUrl'] as String?;
@@ -2186,11 +2530,18 @@ class AppController extends ChangeNotifier {
       case RemoteSlashAction.revoke:
         final code = remote.joinCode ?? '';
         if (code.isEmpty) {
-          return ComposerSlashOutcome.message('Usage: /remote revoke CODE', clearInput: false);
+          return ComposerSlashOutcome.message(
+            'Usage: /remote revoke CODE',
+            clearInput: false,
+          );
         }
-        final result = await _protocol.send('remote_revoke', {'joinCode': code});
+        final result = await _protocol.send('remote_revoke', {
+          'joinCode': code,
+        });
         return ComposerSlashOutcome.message(
-          result.ok ? 'Revoked join code $code.' : (result.error ?? 'Unknown join code.'),
+          result.ok
+              ? 'Revoked join code $code.'
+              : (result.error ?? 'Unknown join code.'),
           clearInput: result.ok,
         );
     }
@@ -2208,7 +2559,9 @@ class AppController extends ChangeNotifier {
       return {
         'kind': 'header',
         'envVar': envVar.trim(),
-        'headerName': headerName.trim().isEmpty ? 'Authorization' : headerName.trim(),
+        'headerName': headerName.trim().isEmpty
+            ? 'Authorization'
+            : headerName.trim(),
       };
     }
     return {'kind': kind, 'envVar': envVar.trim()};
@@ -2274,7 +2627,11 @@ class AppController extends ChangeNotifier {
       await _protocol.send('activate_chat', {'chatId': ids.first});
       activeChatId = ids.first;
     }
-    for (var i = 1; i < ids.length && visibleChatIds.length < maxVisibleChats; i++) {
+    for (
+      var i = 1;
+      i < ids.length && visibleChatIds.length < maxVisibleChats;
+      i++
+    ) {
       await openChatBeside(ids[i]);
     }
     _syncAssetResolver(chatId: activeChatId);
@@ -2284,10 +2641,9 @@ class AppController extends ChangeNotifier {
 
   Future<String?> createChat({String? title}) async {
     if (!_protocol.isConnected) return null;
-    final result = await _protocol.send(
-      'create_chat',
-      {if (title != null) 'title': title},
-    );
+    final result = await _protocol.send('create_chat', {
+      if (title != null) 'title': title,
+    });
     await refreshConfig();
     if (!result.ok) return null;
     final data = result.data;
@@ -2334,12 +2690,17 @@ class AppController extends ChangeNotifier {
     final ids = chats.map((c) => c.chatId).toSet();
     visibleChatIds = visibleChatIds.where(ids.contains).toList();
     if (!inChatWorkspace) return;
-    if (visibleChatIds.isEmpty && activeChatId != null && ids.contains(activeChatId)) {
+    if (visibleChatIds.isEmpty &&
+        activeChatId != null &&
+        ids.contains(activeChatId)) {
       visibleChatIds = [activeChatId!];
     }
   }
 
-  Future<void> _ensureChatOpen(String chatId, {bool replayIfEmpty = true}) async {
+  Future<void> _ensureChatOpen(
+    String chatId, {
+    bool replayIfEmpty = true,
+  }) async {
     await _protocol.send('open_chat', {'chatId': chatId});
     if (replayIfEmpty && _sessions.sessionFor(chatId).messages.isEmpty) {
       await _protocol.send('replay_transcript', {'chatId': chatId});
@@ -2418,7 +2779,10 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resetSession({bool greet = false, bool rebootstrap = false}) async {
+  Future<void> resetSession({
+    bool greet = false,
+    bool rebootstrap = false,
+  }) async {
     final chatId = activeChatId;
     if (chatId == null || !_protocol.isConnected) return;
     await _protocol.send('reset_session', {
@@ -2492,7 +2856,9 @@ class AppController extends ChangeNotifier {
     if (result.ok && result.data is Map) {
       final cacheJson = (result.data as Map)['cache'];
       if (cacheJson is Map) {
-        final cache = AppCacheEntry.fromJson(Map<String, dynamic>.from(cacheJson));
+        final cache = AppCacheEntry.fromJson(
+          Map<String, dynamic>.from(cacheJson),
+        );
         desktopAppCaches[appId] = cache;
         _appWindows.updateCache(appId, cache);
         notifyListeners();
@@ -2533,6 +2899,10 @@ class AppController extends ChangeNotifier {
     unawaited(_appWindows.closeAll());
     updates.removeListener(notifyListeners);
     updates.dispose();
+    _wakeDisposed = true;
+    _wakeSyncGeneration++;
+    wakeVoice.removeListener(_onWakeVoiceChanged);
+    wakeVoice.dispose();
     speechOutput.removeListener(notifyListeners);
     dictation.removeListener(notifyListeners);
     dictation.dispose();

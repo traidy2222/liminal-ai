@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 import {
   type AgentHarness,
+  resolveHarnessEnvRaw,
+  providerConnectionConfigured,
+  type ChatMetadata,
+  autoTitleAfterTurn,
   type ApprovalDecision,
   type PersonaBootstrapProgressEvent,
   buildTranscriptReplayFromConversation,
@@ -59,9 +63,18 @@ export class SessionBridge {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   // send() can still be unwinding after turn_end; background trace is not a new turn.
   private turnEnded = true;
+  private lastTurnSucceeded = false;
+  private readonly voiceSessionOwners = new Set<object>();
+  get voiceSessionActive(): boolean { return this.voiceSessionOwners.size > 0; }
+  setVoiceSession(owner: object, active: boolean): void {
+    if (active) this.voiceSessionOwners.add(owner);
+    else this.voiceSessionOwners.delete(owner);
+  }
   private detachers: Array<() => void> = [];
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
+  private bootstrapAbort?:AbortController;
+  cancelPersonaBootstrap():void{this.bootstrapAbort?.abort(new Error('Personality generation cancelled.'));}
   private transcriptHydrated = false;
 
   constructor(harness: AgentHarness, chatId: string, workspaceRoot: string, sink: FrameSink) {
@@ -102,9 +115,9 @@ export class SessionBridge {
   /** Persisted persona + bootstrap gate (mirrors web `AgentBridge.beginSession`). */
   async beginSession(): Promise<void> {
     await runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+      const forceBootstrap = resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP_FORCE',this.harness.getRuntimePreferences()) === "1";
       const bootstrapPending =
-        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+        resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP',this.harness.getRuntimePreferences()) !== "0" &&
         (forceBootstrap || !this.harness.isPersonaBootstrapCompleted());
       this.awaitingPersonaBootstrapInput = bootstrapPending;
       if (bootstrapPending) return;
@@ -116,6 +129,7 @@ export class SessionBridge {
   }
 
   async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
+    if(!providerConnectionConfigured(this.harness.config.openRouterApiKey))throw new Error('Connect and verify a model before setting up your personality.');
     if (!this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is not pending.");
     }
@@ -126,12 +140,13 @@ export class SessionBridge {
       throw new Error("Persona bootstrap is already in progress.");
     }
     this.bootstrapInFlight = true;
+    this.bootstrapAbort=new AbortController();
     this.emitBootstrapProgress("starting", "Bootstrap started…");
     try {
       await runWithWorkspaceRoot(this.workspaceRoot, async () => {
         const trimmed = input.trim();
-        const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
-        if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
+        const skipAllowed = resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP',this.harness.getRuntimePreferences()) !== "0";
+        if (skipAllowed && (options?.skip || /^(skip|\/skip)$/i.test(trimmed))) {
           this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
           this.awaitingPersonaBootstrapInput = false;
           await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
@@ -164,7 +179,7 @@ export class SessionBridge {
               message: msg,
               at: Date.now(),
               artifacts: detail?.artifacts,
-            })
+            }),this.bootstrapAbort?.signal
         );
         await applyPersonaProfileToHarness(this.harness, bundle.profile);
         await this.harness.patchRuntimePreferences(
@@ -183,8 +198,11 @@ export class SessionBridge {
         await this.harness.sendSessionGreeting();
         this.emitBootstrapProgress("done", "Bootstrap complete.");
       });
+    } catch(error){
+      this.emitBootstrapProgress('failed',error instanceof Error?error.message:'Personality generation failed. Retry or use the built-in personality.');throw error;
     } finally {
       this.bootstrapInFlight = false;
+      this.bootstrapAbort=undefined;
     }
   }
 
@@ -230,6 +248,7 @@ export class SessionBridge {
 
     // Streaming + lifecycle — forwarded verbatim (already wire-safe).
     on("send_start", () => {
+      this.lastTurnSucceeded = false;
       this.turnEnded = false;
       this.startHeartbeat();
     });
@@ -251,8 +270,10 @@ export class SessionBridge {
     on("tool_delta", (p) => this.emit("tool_delta", p));
     on("compose_preview", (p) => this.emit("compose_preview", p));
     on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
+    on("procedure_activity", (p) => this.emit("procedure_activity",p));
     on("turn_summary", (p) => this.emit("turn_summary", p));
     on("turn_end", (p) => {
+      this.lastTurnSucceeded = p.harnessMetrics?.terminationReason === "ok";
       this.turnEnded = true;
       this.stopHeartbeat();
       this.emit("turn_end", p);
@@ -345,6 +366,7 @@ export class SessionBridge {
     this.turnInFlight = true;
     this.turnEnded = false;
     try {
+      this.onUserMessageAccepted?.(message);
       await runWithWorkspaceRoot(this.workspaceRoot, async () => {
       const run = this.harness.send(message, {
         freshContext: opts?.freshContext,
@@ -355,12 +377,18 @@ export class SessionBridge {
       this.startHeartbeat();
       await run;
       });
+      if (this.lastTurnSucceeded) void autoTitleAfterTurn(this.harness, message).then(meta => {
+        if (meta) this.onTitleUpdated?.(meta);
+      }).catch(() => undefined);
     } finally {
       this.turnEnded = true;
       this.turnInFlight = false;
       this.stopHeartbeat();
     }
   }
+
+  onTitleUpdated?: (meta: ChatMetadata) => void;
+  onUserMessageAccepted?: (message:string) => void;
 
   /** Cooperatively abort the in-flight turn, if any. */
   abort(): boolean {
@@ -417,7 +445,9 @@ export class SessionBridge {
 
   /** Detach all emitter subscriptions and reject any in-flight gates. */
   dispose(): void {
+    this.voiceSessionOwners.clear();
     void closeStdioMcp(undefined, this.harness.getToolExecutionScope()).catch(() => undefined);
+    this.harness.closeProcedureRuntime();
     this.stopHeartbeat();
     for (const off of this.detachers) {
       try {

@@ -46,6 +46,8 @@ At a high level, `AgentHarness.send()`:
 
 Root `send()` is bounded primarily by ReAct round limits, tool error controls, and recovery logic. **`AGENT_SEND_TIMEOUT_MS`** (default **1800000** ms = 30 minutes in typed defaults) optionally aborts an in-flight turn when set to a positive value; set `0` to disable that wall clock.
 
+After tool work exhausts the round budget, the harness allows one tool-free completion to report observed results and incomplete checks. It dispatches no further tools and retains `round_cap` termination. A final handoff does not imply the task or its validation succeeded; cancellation and the send timeout still apply.
+
 ## Tool Dispatcher Contract
 
 `ToolDispatcher` enforces:

@@ -2086,6 +2086,16 @@ export function useSSE(options?: {
         }
       });
 
+      es.addEventListener('chat_activity',(e:MessageEvent)=>{
+        trackId(e);
+        window.dispatchEvent(new CustomEvent('liminal:chat_activity',{detail:parseEventData(e)}));
+      });
+      es.addEventListener("chat_title_updated", (e: MessageEvent) => {
+        trackId(e);
+        const payload = parseEventData(e);
+        if (payload) window.dispatchEvent(new CustomEvent("liminal:chat_title_updated", { detail: payload }));
+      });
+
       // Grab the event ID from every event so we can resume after reconnect.
       const trackId = (e: MessageEvent) => {
         persistEventId(e.lastEventId || undefined);

@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ToolRegistry } from "@liminal/core";
 import { createToolDiscoveryTools } from "./tool_activation.js";
+import {getCoreAlwaysToolNames} from './tool_catalog.js';
+
+test('browser-first exposes search and discovery routes a web request to usable browser tools',async()=>{
+ const before=process.env.AGENT_WEB_SEARCH_FETCH,active=process.env.AGENT_BROWSER_ALWAYS_ACTIVE;
+ try{
+  process.env.AGENT_WEB_SEARCH_FETCH='0';process.env.AGENT_BROWSER_ALWAYS_ACTIVE='0';
+  assert.ok(getCoreAlwaysToolNames(true).includes('browser_search'));
+  const registry=registryWithTool('browser_search','browser');
+  const tools=createToolDiscoveryTools(registry);
+  const listed=await tools.listToolFamiliesTool.handler({task_hint:'search the web'});assert.ok(listed.ok);assert.match(listed.output,/Recommended next family.*browser/);assert.ok(listed.output.length<1000);
+  const loaded=await tools.activateToolFamilyTool.handler({family:'web'});assert.ok(loaded.ok);assert.match(loaded.output,/Family "browser" activated/);assert.ok(registry.isActive('browser_search'));
+  process.env.AGENT_WEB_SEARCH_FETCH='1';assert.ok(!getCoreAlwaysToolNames(true).includes('browser_search'));
+ }finally{if(before===undefined)delete process.env.AGENT_WEB_SEARCH_FETCH;else process.env.AGENT_WEB_SEARCH_FETCH=before;if(active===undefined)delete process.env.AGENT_BROWSER_ALWAYS_ACTIVE;else process.env.AGENT_BROWSER_ALWAYS_ACTIVE=active;}
+});
 
 function registryWithTool(name: string, family?: string, lazy = true): ToolRegistry {
   const registry = new ToolRegistry();

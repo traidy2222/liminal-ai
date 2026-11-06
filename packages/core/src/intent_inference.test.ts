@@ -125,14 +125,14 @@ test("resolveMemoryPolicy disables auto recall on exploratory by default", () =>
   }
 });
 
-test("applyTurnInferenceHeuristics upgrades Iran update to research tool-first", () => {
+test("applyTurnInferenceHeuristics upgrades Iran update to research without shrinking analysis", () => {
   const base = neutralTurnInferenceResult("test", { intent: "knowledge", exploratoryCreative: true });
   const refined = applyTurnInferenceHeuristics("update yourself on whats going on with iran", base);
   assert.equal(refined.intent, "research");
   assert.equal(refined.exploratoryCreative, false);
-  assert.equal(refined.toolFirstBias, true);
-  assert.equal(refined.thinkDepth, "brief");
-  assert.ok((refined.reasoningWordBudget ?? 999) <= 140);
+  assert.equal(refined.toolFirstBias, false);
+  assert.equal(refined.thinkDepth, base.thinkDepth);
+  assert.equal(refined.reasoningWordBudget, base.reasoningWordBudget);
 });
 
 test("applyTurnInferenceHeuristics upgrades build-for-yourself to coding tool-first", () => {

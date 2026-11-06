@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync,renameSync } from "node:fs";
 import { join } from "node:path";
 import { personaActivePaths } from "./global_storage.js";
 
@@ -8,6 +8,7 @@ import { personaActivePaths } from "./global_storage.js";
  */
 export function hasPersistedPersonaProfile(workspaceRoot?: string): boolean {
   const paths = personaActivePaths(workspaceRoot);
+  for(const dir of [paths.global,paths.legacy])if(!existsSync(dir)&&existsSync(dir+'.previous'))renameSync(dir+'.previous',dir);
   if (paths.legacyOnly) {
     return existsSync(join(paths.legacy, "runtime_profile.json"));
   }

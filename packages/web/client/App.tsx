@@ -1,4 +1,5 @@
 import {WorkflowDeliverables} from "./WorkflowDeliverables.js";
+import {FirstRunProviderSetup} from './FirstRunProviderSetup.js';
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { useSSE, sendAbortTurn, type MessageEntry, type AutoDreamState, type PersonalityPulseRow, type SendMessageResult, WEB_SERVER_BASE, type ApiReachable, type SseTransport } from "./useSSE.js";
 import { webApiFetch } from "./webApiAuth.js";
@@ -1565,7 +1566,19 @@ export function App() {
   const [windowWidth,  setWindowWidth]  = useState(window.innerWidth);
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [bootstrapInput, setBootstrapInput] = useState("");
+  const [bootstrapSpoken,setBootstrapSpoken]=useState(false);
+  const [providerSetupReady,setProviderSetupReady]=useState(false);
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
+  const [bootstrapError,setBootstrapError]=useState('');
+  const startPersonality=async(skip=false)=>{
+    if(bootstrapSubmitting)return;setBootstrapSubmitting(true);setBootstrapError('');
+    try{
+      if(bootstrapSpoken){const speech=await webApiFetch(WEB_SERVER_BASE+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env:{AGENT_TTS_ENABLED:'1'}}})});if(!speech.ok)throw Error('Could not enable spoken replies. Retry or leave speech off for now.');}
+      const result=await sendPersonaBootstrap(skip?'':bootstrapInput.trim(),{skip});
+      if(result.ok)setBootstrapInput('');else setBootstrapError('Personality setup did not finish. Check the connection, then retry or use the built-in personality.');
+    }catch(error){setBootstrapError(error instanceof Error?error.message:'Setup failed. Please retry.');}
+    finally{setBootstrapSubmitting(false);}
+  };
   const bootstrapTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
@@ -2477,6 +2490,7 @@ export function App() {
 
   return (
     <ShellRouter theme={state.personaUiTheme}>
+      <FirstRunProviderSetup onReady={()=>setProviderSetupReady(true)}/>
       <style>{CSS_ANIMATIONS}</style>
       {vireonConnectNotice ? (
         <div
@@ -2618,7 +2632,7 @@ export function App() {
       )}
 
       {/* ── Persona bootstrap modal ───────────────────────────────────────────── */}
-      {state.personaBootstrapPending && (
+      {providerSetupReady&&state.personaBootstrapPending && (
         <div
           style={styles.modal}
           role="dialog"
@@ -2638,7 +2652,7 @@ export function App() {
               Make Liminal your own
             </div>
             <div style={{ marginBottom: 10, color: "#c8d4e0", lineHeight: 1.65, fontSize: 14 }}>
-              Choose how the assistant should <strong style={{ color: "#e8f0ff" }}>sound</strong> (tone, pace, humor). Tools,
+              Choose the assistant’s <strong style={{ color: "#e8f0ff" }}>writing personality</strong> (name, tone, humor). Tools,
               safety, and task behavior stay the same. You can change this anytime in Settings or with{" "}
               <code style={{ fontSize: 12, color: CYAN }}>set_persona</code>.
             </div>
@@ -2693,35 +2707,29 @@ export function App() {
                 type="button"
                 style={{ ...styles.btn, flex: "1 1 140px" }}
                 disabled={bootstrapSubmitting || !bootstrapInput.trim()}
-                onClick={async () => {
-                  setBootstrapSubmitting(true);
-                  const r = await sendPersonaBootstrap(bootstrapInput.trim());
-                  if (r.ok) setBootstrapInput("");
-                  setBootstrapSubmitting(false);
-                }}
+                onClick={()=>void startPersonality()}
               >
-                Save voice and start
+                Generate personality and start
               </button>
               {state.personaBootstrapAllowSkip && (
                 <button
                   type="button"
                   style={{ ...styles.btn, flex: "1 1 140px" }}
                   disabled={bootstrapSubmitting}
-                  onClick={async () => {
-                    setBootstrapSubmitting(true);
-                    await sendPersonaBootstrap("", { skip: true });
-                    setBootstrapInput("");
-                    setBootstrapSubmitting(false);
-                  }}
+                  onClick={()=>void startPersonality(true)}
                   title="Keeps the default Liminal voice and marks this step complete. You can personalize later."
                 >
-                  USE DEFAULT VOICE
+                  USE BUILT-IN PERSONALITY
                 </button>
               )}
             </div>
+            {bootstrapError&&<p role="alert" style={{color:'#ff9c9c'}}>{bootstrapError}</p>}
+            {bootstrapSubmitting&&<button type="button" style={styles.btn} onClick={()=>void webApiFetch(WEB_SERVER_BASE+'/api/persona/cancel',{method:'POST'}).catch(()=>setBootstrapError('Could not cancel. Check your connection and retry.'))}>Cancel generation</button>}
+            <label style={{display:'block',marginTop:16}}><input type="checkbox" disabled={bootstrapSubmitting} checked={bootstrapSpoken} onChange={e=>setBootstrapSpoken(e.target.checked)}/> Spoken replies (optional)</label>
+            <p style={{fontSize:12,color:'#a8b7c8'}}>Personality changes writing style. Spoken replies use your separately configured speech voice. Microphone and wake word can be set up later in Settings.</p>
             {state.personaBootstrapAllowSkip && (
               <div style={{ marginTop: 10, color: "#6a7a8a", fontSize: 11, lineHeight: 1.45 }}>
-                &quot;Use default voice&quot; skips generation, uses the built-in voice, and completes first-run setup.
+                The built-in personality completes this step immediately.
                 No API calls for persona.
               </div>
             )}

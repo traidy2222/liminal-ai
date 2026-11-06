@@ -1,12 +1,15 @@
 // Presentation only; advanced fields remain searchable and editable.
 const everydaySettings = <String, ({String label, String description})>{
+  'AGENT_WAKE_WORD_ENABLED': (label: 'Always-on wake word', description: 'Listen locally for your wake phrase while the desktop app is open or minimized. Requests go to Mission Control. Idle audio stays in memory.'),
+  'AGENT_WAKE_WORD_PHRASE': (label: 'Wake phrase', description: 'Default: Hey Jarvis. Say your phrase followed by a request, or pause and speak next. Use a distinctive phrase of 2–80 characters.'),
+  'AGENT_WAKE_WORD_IDLE_SECONDS': (label: 'Conversation idle timeout (seconds)', description: 'Return to wake listening after quiet time, from 10 to 300 seconds. Say go to sleep to end a conversation immediately.'),
   'AGENT_TRANSCRIBE_MODEL': (label: 'Transcription mode', description: 'Whisper fast runs locally by default. Optional Qwen accuracy uses more memory and supports fewer languages. Install once with liminal transcription install whisper --cuda or qwen --cuda; omit --cuda without an NVIDIA GPU.'),
   'AGENT_TRANSCRIBE_LANGUAGE': (label: 'Transcription language', description: 'Use auto to detect speech language, or an ISO code such as en, hi, zh, ja or ar. Explicit selection prevents related-language and script mixups.'),
   'AGENT_TRANSCRIBE_ENABLED': (label: 'Voice transcription', description: 'Transcribe microphone and audio attachments locally without a speech API key.'),
 
   'AGENT_TTS_MODEL': (
     label: 'Speech model',
-    description: 'Choose JARVIS Warm for a warmer voice at its original pitch, running on this computer after a one-time download.'
+    description: 'JARVIS Warm runs on this computer after a one-time download and works with single-model mode. Cloud speech models require single-model mode to be off.'
   ),
   'AGENT_FAST_MODEL': (
     label: "Background model",
@@ -30,7 +33,7 @@ const everydaySettings = <String, ({String label, String description})>{
   ),
   'AGENT_TTS_ENABLED': (
     label: "Spoken responses",
-    description: "Read responses aloud when voice is available."
+    description: "Read responses aloud using the selected speech model. In single-model mode, select the local JARVIS Warm voice."
   ),
   'AGENT_MEMORY_GRAPH': (
     label: "Connected memories",

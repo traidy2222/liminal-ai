@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   AgentHarness,
+  providerConnectionConfigured,
   maybeAttachSessionEventLog,
   resolveProviderConfigWithInference,
   fetchInferenceUsageStatus,
@@ -11,6 +12,7 @@ import {
   saveRuntimePreferences,
   resolveHarnessEnvRaw,
   touchChatMetadata,
+  autoTitleAfterTurn,
   loadSessionSnippet,
   loadChatTranscriptFromSessionLog,
   conversationEntriesForHydration,
@@ -104,9 +106,12 @@ export class AgentBridge {
   private harnessHeartbeatTimer: NodeJS.Timeout | null = null;
   // send() can still be unwinding after turn_end; background trace is not a new turn.
   private turnEnded = true;
+  private lastTurnSucceeded = false;
   private turnStartedAt: number | null = null;
   private awaitingPersonaBootstrapInput = false;
   private bootstrapInFlight = false;
+  private bootstrapAbort?:AbortController;
+  cancelPersonaBootstrap():void{this.bootstrapAbort?.abort(new Error('Personality generation cancelled.'));}
   /** Wall-clock ms when the harness last emitted `turn_end` (for client status reconciliation). */
   private lastTurnEndedAtMs: number | null = null;
   /**
@@ -234,7 +239,6 @@ export class AgentBridge {
 
   async resumeSSE(): Promise<void> {
     this.sseSuspended = false;
-    await touchChatMetadata(this.chatId).catch(() => undefined);
     // If the harness is mid-turn at activation, surface a fresh heartbeat so
     // the client UI immediately sees the busy state.
     if (this.isTurnActive) {
@@ -375,6 +379,7 @@ export class AgentBridge {
     };
 
     on("send_start", () => {
+      this.lastTurnSucceeded = false;
       this.turnEnded = false;
       this.startHeartbeat();
     });
@@ -394,6 +399,7 @@ export class AgentBridge {
     );
     on("turn_summary", (p) => this.maybeSend("turn_summary", p));
     on("turn_end", (p) => {
+      this.lastTurnSucceeded = p.harnessMetrics?.terminationReason === "ok";
       this.turnEnded = true;
       this.lastTurnEndedAtMs = Date.now();
       this.stopHeartbeat();
@@ -535,6 +541,10 @@ export class AgentBridge {
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
     }
+    if(this.isBusy)throw new Error('Agent is busy; finish the current turn first.');
+    void touchChatMetadata(this.chatId).then(()=>{
+      this.sse.send('chat_activity',{chatId:this.chatId},this.chatId);
+    }).catch(() => undefined);
     // Pin the workspace for the whole send so file tools, repo_map, world_context,
     // etc. resolve relative to this chat's bound folder rather than the server's cwd.
     await runWithWorkspaceRoot(this.workspaceRoot, async () => {
@@ -547,9 +557,13 @@ export class AgentBridge {
       this.startHeartbeat();
       await run;
     });
+    if (this.lastTurnSucceeded) void autoTitleAfterTurn(this.harness, message).then(meta => {
+      if (meta) this.sse.send("chat_title_updated", { chatId: meta.chatId, title: meta.title });
+    }).catch(() => undefined);
   }
 
   async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
+    if(!providerConnectionConfigured(this.harness.config.openRouterApiKey))throw new Error('Connect and verify a model before setting up your personality.');
     if (!this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is not pending (already completed or not enabled). Refresh the page.");
     }
@@ -560,12 +574,13 @@ export class AgentBridge {
       throw new Error("Persona bootstrap is already in progress.");
     }
     this.bootstrapInFlight = true;
+    this.bootstrapAbort=new AbortController();
     this.emitBootstrapProgress("starting", "Bootstrap started. Validating input...");
     try {
       await runWithWorkspaceRoot(this.workspaceRoot, async () => {
         const trimmed = input.trim();
-        const skipAllowed = process.env["AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP"] !== "0";
-        if (options?.skip || (skipAllowed && /^(skip|\/skip)$/i.test(trimmed))) {
+        const skipAllowed = resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP',this.harness.getRuntimePreferences()) !== "0";
+        if (skipAllowed && (options?.skip || /^(skip|\/skip)$/i.test(trimmed))) {
           this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
           this.awaitingPersonaBootstrapInput = false;
           await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
@@ -605,7 +620,7 @@ export class AgentBridge {
               message,
               at: Date.now(),
               artifacts: detail?.artifacts,
-            })
+            }),this.bootstrapAbort?.signal
         );
         const profile = bundle.profile;
         this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");
@@ -633,8 +648,11 @@ export class AgentBridge {
         await this.harness.sendSessionGreeting();
         this.emitBootstrapProgress("done", "Bootstrap complete.");
       });
+    } catch(error){
+      this.emitBootstrapProgress('failed',error instanceof Error?error.message:'Personality generation failed. Retry or use the built-in personality.');throw error;
     } finally {
       this.bootstrapInFlight = false;
+      this.bootstrapAbort=undefined;
     }
   }
 

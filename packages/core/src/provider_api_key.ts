@@ -100,7 +100,7 @@ export function resolveLocalProviderApiKey(): string | undefined {
 export function ensureProviderApiKeysInProcess(): void {
   for (const file of providerApiKeyEnvFileCandidates()) {
     const parsed = readDotEnvFile(file);
-    for (const name of PROVIDER_API_KEY_ENV_NAMES) {
+    for (const name of [...PROVIDER_API_KEY_ENV_NAMES,'AGENT_LOCAL_API_KEY']) {
       const v = parsed[name]?.trim();
       if (v && !process.env[name]?.trim()) {
         process.env[name] = v;

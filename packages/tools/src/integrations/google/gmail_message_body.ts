@@ -147,18 +147,8 @@ export function repairEmailUnicode(text: string): string {
   return s;
 }
 
-/** Replace em/en dashes in outbound mail with natural punctuation (less AI-telltale). */
-export function humanizeOutboundEmailCopy(text: string): string {
-  if (!text) return text;
-  let s = text
-    .replace(/&mdash;|&#0*8212;|&#x0*2014;/gi, ", ")
-    .replace(/&ndash;|&#0*8211;|&#x0*2013;/gi, ", ")
-    .replace(/\s*[\u2014\u2013]\s*/g, ", ")
-    .replace(/([,.;])\s*,/g, "$1")
-    .replace(/,\s*([.!?])/g, "$1")
-  s = s.replace(/ {2,}/g, " ");
-  return s;
-}
+/** @deprecated Presentation belongs to the requested message, not a punctuation rewrite. */
+export function humanizeOutboundEmailCopy(text: string): string { return text; }
 
 export function decodeHtmlEntities(text: string): string {
   return text

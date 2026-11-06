@@ -24,6 +24,7 @@ export interface PropertySchema {
   /** For nested objects. */
   properties?: Record<string, PropertySchema>;
   required?: string[];
+  additionalProperties?: boolean | PropertySchema;
   description?: string;
   /** Union: value must satisfy exactly one branch (recursive). */
   anyOf?: PropertySchema[];
@@ -570,6 +571,9 @@ export interface TurnSummary {
 }
 
 export interface AgentEventMap {
+  cache_usage: import("./cache_telemetry.js").CacheUsageRecord;
+  /** Bounded runtime summaries; detailed evidence is retrieved by ID. */
+  procedure_activity: import('./procedural_memory/model.js').ProcedureActivity;
   /** Emitted at the start of each root/child send() with the user text (session logging). */
   send_start: { userMessage: string; agentDepth: number; traceId?: string };
   /** Assistant-visible stream; `trace` / `reasoning` are non-user channels (verbosity rules apply). */
@@ -586,6 +590,7 @@ export interface AgentEventMap {
   tool_executing: { callId: string; name: string };
   /** Spoken-channel clip ready for web playback (not shown in chat transcript). */
   speech: {
+    voiceId?: string;
     clipId: string;
     text: string;
     audioUrl: string;
@@ -1035,6 +1040,8 @@ export interface PersonaConfig {
 // ─── Agent config ─────────────────────────────────────────────────────────────
 
 export interface AgentConfig {
+  /** Opt in explicitly, or resume an already adopted workspace store. */
+  proceduralMemory?: {enabled?:boolean;databasePath?:string;consolidate?:boolean};
   openRouterApiKey: string;
   model: string;
   baseURL: string;
