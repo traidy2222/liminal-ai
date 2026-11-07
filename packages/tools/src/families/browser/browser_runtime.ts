@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createServer, type Server } from "node:http";
 import { randomUUID, createHash } from "node:crypto";
-import {browserScreenshotPrivacyStyle} from "./browser_screenshot_privacy.js";
+import {browserPrivateInputMarker,browserPrivateInputSelector,browserScreenshotPrivacyStyle} from "./browser_screenshot_privacy.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { effectiveHarnessEnvRaw, resolveWorkspaceRoot,saveAccount,listSavedAccounts,importAccountMemories,type AccountOwner,type AccountStatus,type AccountLoginMethod } from "@liminal/core";
 import type { Page, Browser, BrowserContext, Locator, Frame } from "playwright";
@@ -220,8 +220,10 @@ export async function browserCredentialAction(args: Record<string, unknown>) {
     }
     const login=readBrowserLoginForFill(session.page.url(),String(args.credential_id??''));
     if(fields.username_ref)await fields.username_ref.fill(login.username,{timeout:5000});
-    await fields.password_ref!.fill(login.password,{timeout:5000});
-    if(fields.confirm_password_ref)await fields.confirm_password_ref.fill(login.password,{timeout:5000});
+    for(const field of [fields.password_ref!,fields.confirm_password_ref].filter((field): field is Locator=>!!field)){
+      await field.evaluate((element,marker)=>element.setAttribute(marker,''),browserPrivateInputMarker,{timeout:5000});
+      await field.fill(login.password,{timeout:5000});
+    }
     markBrowserLoginFilled(String(args.credential_id));
     return { ok: true as const, output: "SAVED_LOGIN_FILLED: password remains in the encrypted local store. Submit and verify the account page separately." };
   } catch {
@@ -1040,7 +1042,7 @@ const frameNodeRefs = new WeakMap<Frame, Map<string,string>>();
 
 async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promise<{items:DomSnapshotItem[];readable:string;context:string;contextSelector:string}> {
   const engine=await ensureBrowserElementRefs();
-  return target.evaluate(({limit,token,namespace,engine})=>{
+  return target.evaluate(({limit,token,namespace,engine,privateInputSelector})=>{
     const state=window as unknown as Record<string,WeakMap<Element,string>>;
     if(!state[namespace])Object.defineProperty(state,namespace,{value:new WeakMap<Element,string>()});
     const identities=state[namespace]!;
@@ -1216,7 +1218,7 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       }
 
       if((input?.readOnly)||(el instanceof HTMLTextAreaElement&&el.readOnly))state.push('readonly');
-      if(input?.type==='password')state.push(input.value?'password=filled':'password=empty');
+      if(input?.matches(privateInputSelector))state.push(input.value?'password=filled':'password=empty');
       else if(control&&!(el instanceof HTMLSelectElement))state.push('value='+JSON.stringify(control.value.slice(0,180)));
       else if((el as HTMLElement).isContentEditable){const text=(el as HTMLElement).innerText.replace(/[\u200b\ufeff]/g,'');state.push('value='+JSON.stringify(text.trim()?text.slice(0,180):''));}
       const placeholder=el.getAttribute('placeholder')||el.getAttribute('aria-placeholder')||el.getAttribute('data-placeholder');if(placeholder)state.push('placeholder='+JSON.stringify(placeholder.slice(0,180)));
@@ -1246,7 +1248,7 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
     const searchPage=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
     const reading={page_kind:searchPage?'search_results':listing||articles.length>1?'listing':articles.length===1?'article':'page',...(listing?{result_count:resultCards.length,excerpted_results:Math.min(resultCards.length,6)}:{}),rendered_chars:readable.length,excerpt_chars:Math.min(readable.length,5000),truncated:readable.length>5000||listing&&(resultCards.length>6||resultCards.some(card=>(card as HTMLElement).innerText.replace(/\s+/g,' ').trim().length>900))};
     return {items,readable:readable.slice(0,5000)+(readable.length>5000?'\n…(readable excerpt truncated; use browser_extract for the needed section)':''),contextSelector:engine+'='+targetNamespace+':context-'+token,context:JSON.stringify({focus:modal?'dialog':'page',viewport_css:{width:innerWidth,height:innerHeight},reading,text:content.innerText?.replace(/\s+/g,' ').trim().slice(0,300),...(feedback?{feedback}:{}),...(timestamps.length?{timestamps}:{}),...(canvas||unlabeledImages?{visual_content:{canvas,unlabeledImages,note:'Use a screenshot for visual content that has no DOM text.'}}:{})})};
-  },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace,engine});
+  },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace,engine,privateInputSelector:browserPrivateInputSelector});
 }
 
 export async function buildPageSnapshot(page:Page,maxChars=8_000,timeoutMs=5000):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
@@ -1304,7 +1306,7 @@ async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotT
       const root=await main.count()?main:activeRoot;
       const yaml=dom.readable?'':await root.ariaSnapshot().catch(()=>'');
       if(yaml)trees.push(`${frameLabel}:\n${yaml.slice(0,4500)}`);
-      const passwordValues=await frame.locator('input[type="password"]').evaluateAll(elements=>elements.map(el=>(el as HTMLInputElement).value));
+      const passwordValues=await frame.locator(browserPrivateInputSelector).evaluateAll(elements=>elements.map(el=>(el as HTMLInputElement).value));
       hasPasswordInput ||= passwordValues.length>0;passwords.push(...passwordValues.filter(Boolean));
     }catch(err){contexts.push(`frame observation unavailable: ${err instanceof Error?err.name:'error'}`);}
   }
@@ -2842,7 +2844,7 @@ export async function extractFromSession(
       const forms:Record<string,unknown>[]=[];
       for(const frame of session.page.frames()){
         if(frame!==session.page.mainFrame()){const host=await frame.frameElement().catch(()=>null);if(!host||!await host.isVisible().catch(()=>false))continue;}
-        const observed=await frame.evaluate(({hidden})=>{
+        const observed=await frame.evaluate(({hidden,privateInputSelector})=>{
           const roots:(Document|ShadowRoot)[]=[document];
           for(let i=0;i<roots.length;i++)for(const el of roots[i]!.querySelectorAll('*'))if(el.shadowRoot)roots.push(el.shadowRoot);
           const controls=roots.flatMap(root=>[...root.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>('input,textarea,select')]).filter(el=>hidden||el.type!=='hidden'&&el.getClientRects().length>0&&!el.closest('[hidden],[inert],[aria-hidden="true"]'));
@@ -2850,11 +2852,11 @@ export async function extractFromSession(
           for(const el of controls){const group=groups.get(el.form)??[];group.push(el);groups.set(el.form,group);}
           return [...groups].map(([form,fields])=>({action:form?.action??null,method:form?.method??null,unowned:form===null,fields:fields.map(el=>({
             tag:el.tagName.toLowerCase(),type:el.type,name:el.name||null,id:el.id||null,label:el.getAttribute('aria-label')||[...(el.labels??[])].map(label=>label.textContent?.trim()).join(' ')||null,
-            placeholder:el.getAttribute('placeholder'),value:el.type==='password'?null:el.value||null,password_filled:el.type==='password'?!!el.value:undefined,required:el.required,disabled:el.disabled,
+            placeholder:el.getAttribute('placeholder'),value:el.matches(privateInputSelector)?null:el.value||null,password_filled:el.matches(privateInputSelector)?!!el.value:undefined,required:el.required,disabled:el.disabled,
             checked:el instanceof HTMLInputElement&&['checkbox','radio'].includes(el.type)?el.checked:undefined,
             options:el instanceof HTMLSelectElement?[...el.options].map(o=>({label:o.label,value:o.value,selected:o.selected})):undefined,validation:!el.validity.valid?el.validationMessage:null,
           }))}));
-        },{hidden:includeHidden});
+        },{hidden:includeHidden,privateInputSelector:browserPrivateInputSelector});
         forms.push(...observed.map(form=>({...form,frame_origin:new URL(frame.url()).origin})));
       }
       return {ok:true,output:JSON.stringify(forms,null,2)};

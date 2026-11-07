@@ -83,7 +83,9 @@ export function indexAccountMemory(key:string,value:string,scope?:string,sourceC
  const origin=url?new URL(accountSafeUrl(url)).origin:domain?'https://'+domain:undefined;
  const username=text.match(/\bUsername:\s*([^\s(\n]+)/i)?.[1]?.replace(/^[`"']|[`"',;]$/g,'')??email;
  if(!origin||!username)return;
- const credentialId=text.match(/\b(?:credential(?: store)?(?: id)?):\s*([a-f0-9-]{36})\b/i)?.[1];
+ // Free-text notes cannot attach a credential from a different service.
+ const requestedId=text.match(/\b(?:credential(?: store)?(?: id)?):\s*([a-f0-9-]{36})\b/i)?.[1];
+ const credentialId=requestedId&&listSavedAccounts().find(a=>a.credentialId===requestedId&&a.origin===origin)?.credentialId;
  return saveAccount({origin,username,email,status:'reported',sourceNote:key,sourceChat,...(url&&!explicit?{profileUrl:url}:{}),...(credentialId?{credentialId}:{})});
 }
 export async function importAccountMemories():Promise<void>{

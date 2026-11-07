@@ -115,7 +115,12 @@ void main() {
         'providerVerified': false,
       });
       expect(controller.needsProviderSetup, isTrue);
-      controller.config = controller.config!.copyWith(providerVerified: true);
+      controller.config = controller.config!.copyWith(providerManaged: true);
+      expect(controller.needsProviderSetup, isFalse);
+      controller.config = controller.config!.copyWith(
+        providerManaged: false,
+        providerVerified: true,
+      );
       expect(controller.needsProviderSetup, isFalse);
       controller.requestProviderSetup();
       expect(controller.needsProviderSetup, isTrue);

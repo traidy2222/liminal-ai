@@ -4,7 +4,9 @@ import type {Page} from 'playwright';
 /** Observe URLs supplied by this page's copy operation during an action.
  * Never read the OS clipboard; preserve the site's original clipboard calls. */
 export async function observeBrowserCopyLinks(page:Page){
- const key='__liminal_copy_'+randomUUID().replaceAll('-',''),frames=page.frames();
+ let frames: ReturnType<Page['frames']>;
+ try{frames=page.frames();}catch{return async()=>[] as string[];}
+ const key='__liminal_copy_'+randomUUID().replaceAll('-','');
  await Promise.all(frames.map(frame=>frame.evaluate(key=>{
   const links:string[]=[];
   const record=(text:string)=>{

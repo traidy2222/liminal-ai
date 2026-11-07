@@ -64,6 +64,7 @@ export class SessionBridge {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   // send() can still be unwinding after turn_end; background trace is not a new turn.
   private turnEnded = true;
+  private readonly startedToolCalls = new Set<string>();
   private lastTurnSucceeded = false;
   private readonly voiceSessionOwners = new Set<object>();
   get voiceSessionActive(): boolean { return this.voiceSessionOwners.size > 0; }
@@ -254,6 +255,7 @@ export class SessionBridge {
 
     // Streaming + lifecycle — forwarded verbatim (already wire-safe).
     on("send_start", () => {
+      this.startedToolCalls.clear();
       this.lastTurnSucceeded = false;
       this.turnEnded = false;
       this.startHeartbeat();
@@ -271,6 +273,7 @@ export class SessionBridge {
     on("tool_start", (p) => {
       if(this.turnEnded)return;
       this.startHeartbeat();
+      this.startedToolCalls.add(p.callId);
       this.emit("tool_start", p);
     });
     on("speech", (p) => this.emit("speech", p));
@@ -278,7 +281,9 @@ export class SessionBridge {
     on("terminal_view", (p) => this.emit("terminal_view", p));
     on("tool_delta", (p) => {if(!this.turnEnded)this.emit("tool_delta", p);});
     on("compose_preview", (p) => {if(!this.turnEnded)this.emit("compose_preview", p);});
-    on("tool_result", (p) => {if(!this.turnEnded)this.emit("tool_result", wireToolResult(p));});
+    on("tool_result", (p) => {
+      if (this.startedToolCalls.delete(p.callId)) this.emit("tool_result", wireToolResult(p));
+    });
     on("procedure_activity", (p) => this.emit("procedure_activity",p));
     on("turn_summary", (p) => this.emit("turn_summary", p));
     on("turn_end", (p) => {

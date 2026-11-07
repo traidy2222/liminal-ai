@@ -5,6 +5,10 @@ import {randomUUID} from 'node:crypto';
 export type OutcomeUpdate = {id:string;status:'completed'|'blocked';reason?:string;subject?:string;evidence?:{observation_id:string;quote:string}[]};
 type Outcome = {id:string;description:string;status:'pending'|'completed'|'blocked';reason?:string;evidence?:{observation_id:string;quote:string}[]};
 const normalize=(text:string)=>text.normalize('NFKC').replace(/\s+/g,' ').trim().toLowerCase();
+function containsSubject(text: string, subject: string): boolean {
+ const escaped=subject.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&');
+ return new RegExp('(?:^|[^\\p{L}\\p{N}])'+escaped+'(?=$|[^\\p{L}\\p{N}])','u').test(text);
+}
 const browserObservation=/^browser_(open|act|navigate|snapshot|extract|wait_for|search)$/;
 const bookkeeping=new Set(['plan','think','reason','breakdown','list_tool_families','activate_tool_family','mcp_search_tools','browser_tabs','browser_credentials']);
 export class TaskCompletionLedger {
@@ -79,8 +83,12 @@ export class TaskCompletionLedger {
     // prevents using evidence for five siblings to tick the missing sixth.
     if(this.seeded.some(s=>normalize(s)===normalize(item.description))){
      const subject=normalize(update.subject??item.description);
-     if(subject.length<3||!normalize(item.description).includes(subject))throw Error('subject must name the requested item within its original description.');
-     if(!update.evidence.some(proof=>this.observations.get(proof.observation_id)?.includes(subject)))throw Error('No observed page state contains the requested item '+item.id+': '+item.description);
+     const description=normalize(item.description);
+     if(subject.length<3||!containsSubject(description,subject)||
+       subject!==description&&(subject.length<Math.min(8,description.length)||
+         this.seeded.some(s=>normalize(s)!==description&&containsSubject(normalize(s),subject))))
+      throw Error('subject must distinctly name this requested item within its original description.');
+     if(!update.evidence.some(proof=>containsSubject(normalize(proof.quote),subject)))throw Error('No cited quote names the requested item '+item.id+': '+item.description);
     }
     item.status='completed';item.evidence=update.evidence.map(p=>({...p}));delete item.reason;
    }

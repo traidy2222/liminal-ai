@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {AgentHarness} from '@liminal/core';import {AgentBridge} from './agentBridge.js';
-import {LIMINAL_DEFAULT_PROFILE} from '../../tools/dist/families/harness_ui/persona_default.js';
+import {LIMINAL_DEFAULT_PROFILE} from '@liminal/tools';
 
 test('an existing web chat clears stale onboarding state after global persona completion',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'liminal-web-persona-'));const before={...process.env};

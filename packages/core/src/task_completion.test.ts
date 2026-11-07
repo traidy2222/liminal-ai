@@ -8,6 +8,9 @@ test('explicit requested items cannot disappear in a shorter plan or a five-item
  for(const item of ledger.outcomes.slice(0,5))assert.equal(ledger.update({updates:[{id:item.id,status:'completed',evidence:[{observation_id:id,quote:item.description}]}]}).ok,true);
  assert.equal(ledger.pending[0]?.description,'Publish the launch announcement');assert.equal(ledger.needsReview,true);
  assert.equal(ledger.update({updates:[{id:'t6',status:'completed',evidence:[{observation_id:id,quote:'Run the launch checklist'}]}]}).ok,false);
+ for(const subject of ['launch','announce','launch checklist']){
+  assert.equal(ledger.update({updates:[{id:'t6',status:'completed',subject,evidence:[{observation_id:id,quote:'Run the launch checklist'}]}]}).ok,false);
+ }
  const final=ledger.observe('browser_act',true,'PAGE_CONTEXT: Publish the launch announcement');
  assert.equal(ledger.update({updates:[{id:'t6',status:'completed',evidence:[{observation_id:final!,quote:'Publish the launch announcement'}]}]}).ok,true);assert.equal(ledger.needsReview,false);
 });

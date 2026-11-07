@@ -1575,8 +1575,15 @@ export function App() {
   const startPersonality=async(skip=false)=>{
     if(bootstrapSubmitting)return;setBootstrapSubmitting(true);setBootstrapError('');
     try{
-      if(!skip){const settings=await webApiFetch(WEB_SERVER_BASE+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env:{AGENT_PERSONA_UI_THEME_LLM:bootstrapTheme?'1':'0',AGENT_PERSONA_UI_COPY:bootstrapTheme?'1':'0'}}})});if(!settings.ok)throw Error('Could not save personality options. Please retry.');}
-      if(bootstrapSpoken){const speech=await webApiFetch(WEB_SERVER_BASE+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env:{AGENT_TTS_ENABLED:'1'}}})});if(!speech.ok)throw Error('Could not enable spoken replies. Retry or leave speech off for now.');}
+      const env: Record<string, string> = {};
+      if (!skip && bootstrapTheme) Object.assign(env, {AGENT_PERSONA_UI_THEME_LLM:'1', AGENT_PERSONA_UI_COPY:'1'});
+      if (bootstrapSpoken) env.AGENT_TTS_ENABLED = '1';
+      if (Object.keys(env).length) {
+        const settings = await webApiFetch(WEB_SERVER_BASE+'/api/settings', {
+          method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env}}),
+        });
+        if (!settings.ok) throw Error('Could not save personality options. Please retry.');
+      }
       const result=await sendPersonaBootstrap(skip?'':bootstrapInput.trim(),{skip,name:bootstrapName.trim()||undefined});
       if(result.ok)setBootstrapInput('');else setBootstrapError('Personality setup did not finish. Check the connection, then retry or use the built-in personality.');
     }catch(error){setBootstrapError(error instanceof Error?error.message:'Setup failed. Please retry.');}

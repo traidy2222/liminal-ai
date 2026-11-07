@@ -503,7 +503,7 @@ class WinWebViewController {
     _isNowFullScreen = bEnable;
     await _initFuture;
     WebviewWinFloatingPlatform.instance.setFullScreen(_webviewId, bEnable);
-    if (!bEnable) {
+    if (!bEnable && _hasLayoutBounds && !(_renderWhenHidden && !_requestedVisible)) {
       await WebviewWinFloatingPlatform.instance.updateBounds(
         _webviewId,
         _lastLayoutOffset,

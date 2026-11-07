@@ -46,10 +46,10 @@ export function markBrowserLoginFilled(id:string){
 }
 /** A site may shorten or canonicalize a signup name. Update only the login
  * identifier after confirmation; the encrypted password and origin stay intact. */
-export function updateBrowserLoginUsername(id:string,username:string){
+export function updateBrowserLoginUsername(id:string,username:string,expectedOrigin?:string){
  if(!/^[a-f0-9-]{36}$/.test(id)||!username.trim()||username.length>160)throw Error('Invalid saved login identifier');
  const target=path.join(directory(),id+'.json'),login=JSON.parse(fs.readFileSync(target,'utf8')) as SavedLogin;
- if(login.id!==id)throw Error('Saved login identity mismatch');
+ if(login.id!==id||expectedOrigin&&login.origin!==safeOrigin(expectedOrigin))throw Error('Saved login identity or origin mismatch');
  if(login.username!==username){const temp=target+'.'+randomUUID()+'.tmp';fs.writeFileSync(temp,JSON.stringify({...login,username}),{mode:0o600});fs.renameSync(temp,target);}
  return {id:login.id,origin:safeOrigin(login.origin),username,createdAt:login.createdAt};
 }

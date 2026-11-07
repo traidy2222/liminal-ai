@@ -187,13 +187,15 @@ test('a concise persona needs one draft and no invented bans or rule quotas',asy
 });
 
 
-test('explicit and brief names override associated places without repair calls',async()=>{
- for(const [brief,name] of [['Sherlock Holmes',undefined],['a consulting detective named Sherlock Holmes with dry wit',undefined],['A detective, lives at 221B Baker Street','Sherlock Holmes']] as const){
+test('explicit names override associated places without repair calls',async()=>{
+ for(const [brief,name] of [['Name: Sherlock Holmes',undefined],['a consulting detective named Sherlock Holmes with dry wit',undefined],['A detective, lives at 221B Baker Street','Sherlock Holmes']] as const){
   let calls=0;setPersonaGeneratorTestHooks({callPersonaModel:async()=>{calls++;return {...sampleProfile,name:'221B Baker Street'};}});
   try{const profile=await generatePersonaProfile(brief,5,undefined,'fixture','offline','http://127.0.0.1:1',undefined,undefined,undefined,name);
    assert.equal(profile.name,'Sherlock Holmes');assert.equal(calls,1);
   }finally{setPersonaGeneratorTestHooks(undefined);}
  }
  assert.equal(requestedPersonaName('warm voice','JARVIS'),'JARVIS');
+ assert.equal(requestedPersonaName('dry British valet AI'),undefined);
+ assert.equal(requestedPersonaName('called Sir <Reginald>'),undefined);
  assert.throws(()=>requestedPersonaName('brief','Name\nInjected line'),/one line/);
 });

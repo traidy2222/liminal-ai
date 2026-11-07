@@ -88,3 +88,10 @@ test('recording an account refreshes the current turn snapshot before the next m
  let calls=0;s.streamWithRetry=async(messages:any[])=>{calls++;return(async function*(){if(calls===1)yield{choices:[{index:0,delta:{tool_calls:[{index:0,id:'record-account',type:'function',function:{name:'browser_credentials',arguments:'{}'}}]},finish_reason:'tool_calls'}]};else{const block=messages.find(m=>m.role==='system'&&typeof m.content==='string'&&m.content.includes('SAVED ACCOUNTS'))?.content;assert.match(block,/email_code/);assert.ok(!block.includes('credential_id'));yield{choices:[{index:0,delta:{content:'The account uses email codes.'},finish_reason:'stop'}]};}})();};
  try{await s.runReActLoop();assert.equal(calls,2);}finally{h.closeProcedureRuntime();}
 }));
+
+test('free-text account memory cannot attach a different origin credential',async()=>isolated(async()=>{
+ saveAccount({origin:'https://original.example.test',username:'detective',credentialId,status:'prepared'});
+ const other=indexAccountMemory('fact:other_account','Account created.\nUsername: wrong\nOrigin: https://other.example.test\nCredential ID: '+credentialId,'global','current');
+ assert.equal(other?.credentialId,undefined);
+ assert.equal(listSavedAccounts().find(a=>a.credentialId===credentialId)?.username,'detective');
+}));

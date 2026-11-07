@@ -191,10 +191,7 @@ export function requestedPersonaName(input:string,explicit?:string):string|undef
  const label=input.match(/(?:^|\n)\s*(?:name|persona name|assistant name)\s*:\s*([^\n]+)/i);
  if(label)return clean(label[1]!);
  const named=input.match(/\b(?:named|called|your name is|call you)\s+["“]?([^\n,.;!?]+?)(?=["”]|\s+(?:with|who|but|and|that)\b|$)/i);
- if(named)return clean(named[1]!);
- const role=input.match(/^(?:you are|act as|embody|be|based on|inspired by)\s+([^\n,.;!?]+?)(?=\s+(?:with|who|but)\b|[,.;!?]|$)/i);
- if(role&&role[1]!.trim().split(/\s+/).length<=4)return clean(role[1]!);
- if(/^[\p{L}][\p{L}\p{N}'’.-]*(?:\s+[\p{L}][\p{L}\p{N}'’.-]*){0,3}$/u.test(input.trim()))return clean(input);
+ if(named){try{return clean(named[1]!);}catch{return undefined;}}
  return undefined;
 }
 

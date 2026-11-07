@@ -32,7 +32,7 @@ export async function browserContainerClickPosition(locator:Locator){
   for(const y of [.04,.12,.3,.7,.88,.96])for(const x of [.02,.08,.3,.7,.92,.98])points.push({x:box.x+box.width*x,y:box.y+box.height*y});
   for(const p of points){
    if(p.x<0||p.y<0||p.x>=innerWidth||p.y>=innerHeight)continue;
-   let hit=document.elementFromPoint(p.x,p.y);while(hit?.shadowRoot){const inner=hit.shadowRoot.elementFromPoint(p.x,p.y);if(!inner||inner===hit)break;hit=inner;}
+   let hit=document.elementFromPoint(p.x,p.y);while(hit!==el&&hit?.shadowRoot){const inner=hit.shadowRoot.elementFromPoint(p.x,p.y);if(!inner||inner===hit)break;hit=inner;}
    if(hit&&(hit===el||el.contains(hit))&&hit.closest(interactive)===el)return {x:p.x-box.x-(el as HTMLElement).clientLeft,y:p.y-box.y-(el as HTMLElement).clientTop};
   }
   return null;

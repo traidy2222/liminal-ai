@@ -25,8 +25,8 @@ test('solver uses the current or observed task tab, injects privately, and refus
  const original=globalThis.fetch;
  process.env.LIMINAL_BROWSER_DATA_DIR=root;process.env.AGENT_CAPTCHA_KEY='synthetic-captcha-key';process.env.AGENT_CAPTCHA_SERVICE='2captcha';
  const server=createServer((_req,res)=>{res.setHeader('Content-Type','text/html');res.end('<div class="g-recaptcha" data-callback="onSolved" style="width:300px;height:70px" data-sitekey="fixture-site-key"><input type="checkbox" aria-label="verification"></div><textarea name="g-recaptcha-response" hidden></textarea><output id="result">Pending verification</output><script>window.onSolved=()=>document.querySelector(\'#result\').textContent=\'Verification accepted\';</script>');});
- await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const addr=server.address();assert.ok(addr&&typeof addr!=='string');
  try{
+  await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});const addr=server.address();assert.ok(addr&&typeof addr!=='string');
   const opened=await openBrowserSession({ownerTaskId:'solver-owner',href:`http://127.0.0.1:${addr.port}/`,waitUntil:'load',navTimeoutMs:5000,postWaitMs:0,includeConsole:false,includeSnapshot:true});
   assert.ok(opened.ok,opened.ok?'':opened.error);
   let requests=0;
@@ -49,10 +49,10 @@ test('solver uses the current or observed task tab, injects privately, and refus
   await page.keyboard.press('Escape');await page.getByRole('button',{name:'Sign up'}).click();assert.equal(await page.locator('h1').innerText(),'Account created');
   await page.setContent('<div class="g-recaptcha" style="width:300px;height:70px" data-sitekey="fixture-site-key"></div>');
   const short='tab-'+opened.sessionId.replace(/[^a-z0-9]/gi,'').slice(0,8);
-  const sibling=await captchaSolveTool.handler({session_id:short},undefined,{taskId:'other-owner'} as AgentHarness);
-  assert.equal(sibling.ok,false);assert.equal(requests,2);
+  const sibling=await captchaSolveTool.handler({session_id:opened.sessionId},undefined,{taskId:'other-owner'} as AgentHarness);
+  assert.equal(sibling.ok,false);assert.match(sibling.error!,/belongs to another agent/);assert.equal(requests,2);
   await page.locator('.g-recaptcha').evaluate(el=>el.setAttribute('hidden',''));
-  const passive=await captchaSolveTool.handler({},undefined,owner);
+  const passive=await captchaSolveTool.handler({session_id:short},undefined,owner);
   assert.equal(passive.ok,false);assert.match(JSON.stringify(passive),/background/);assert.equal(requests,2);
   await page.setContent('<div role="dialog"><h1>Human verification</h1><canvas width="320" height="160"></canvas></div>');
   const visual=await captchaSolveTool.handler({},undefined,owner);assert.equal(visual.ok,false);assert.match(JSON.stringify(visual),/VISIBLE_VISUAL_CHALLENGE/);assert.equal(requests,2);

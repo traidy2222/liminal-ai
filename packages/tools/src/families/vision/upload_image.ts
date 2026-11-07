@@ -1,4 +1,4 @@
-import {readFile} from 'node:fs/promises';
+import {readFile,stat} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {modelSupportsNativeVisionAsync,type AgentHarness,type ToolResult} from '@liminal/core';
 import {defineTool} from '../../shared/helpers.js';
@@ -17,7 +17,11 @@ export async function attachNativeImage(harness:AgentHarness,input:string,note:s
  }else{
   const file=resolve(input),mime=mimeTypes[extname(file).toLowerCase()];
   if(!mime)return {ok:false,error:'Supported image files: JPEG, PNG, GIF, WebP.'};
-  let bytes:Buffer;try{bytes=await readFile(file);}catch{return {ok:false,error:'Image file could not be read: '+file};}
+  let bytes:Buffer;try{
+   const info=await stat(file);
+   if(!info.isFile()||!info.size||info.size>maxBytes)return {ok:false,error:'Image must be a regular file between 1 byte and 4 MB.'};
+   bytes=await readFile(file);
+  }catch{return {ok:false,error:'Image file could not be read: '+file};}
   if(!bytes.length||bytes.length>maxBytes)return {ok:false,error:'Image must contain data and be no larger than 4 MB.'};
   dataUrl=`data:${mime};base64,${bytes.toString('base64')}`;source=file;
  }

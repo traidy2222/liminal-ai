@@ -65,6 +65,7 @@ export interface ChatSummary {
 export interface WireAppConfig {
   apiKeyConfigured: boolean;
   providerVerified?: boolean;
+  providerManaged?: boolean;
   personaBootstrapEnabled: boolean;
   personaBootstrapPending: boolean;
   personaBootstrapAllowSkip: boolean;

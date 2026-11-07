@@ -311,8 +311,9 @@ class AppController extends ChangeNotifier {
   bool get needsProviderSetup =>
       config != null &&
       (_providerSetupRequested ||
-          !config!.apiKeyConfigured ||
-          (config!.personaBootstrapPending && !config!.providerVerified));
+          (!config!.providerManaged &&
+              (!config!.apiKeyConfigured ||
+                  (config!.personaBootstrapPending && !config!.providerVerified))));
   bool get needsPersonaBootstrap =>
       config != null && config!.personaBootstrapPending;
 

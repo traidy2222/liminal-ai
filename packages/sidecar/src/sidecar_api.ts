@@ -39,6 +39,7 @@ import { applyApiKeyToProcess, firstApiKeyFromEnv, writeEnvMerge } from "./env_f
 export interface DesktopConfigSnapshot {
   apiKeyConfigured: boolean;
   providerVerified?: boolean;
+  providerManaged?: boolean;
   personaBootstrapEnabled: boolean;
   personaBootstrapPending: boolean;
   personaBootstrapAllowSkip: boolean;
@@ -111,6 +112,7 @@ export async function buildDesktopConfig(
     providerConnectionConfigured(cfg.openRouterApiKey);
   return {
     apiKeyConfigured,
+    providerManaged: resolveInferenceMode(prefs) === "managed",
     providerVerified: await providerSetupVerified({baseURL:cfg.baseURL,model:cfg.model,apiKey:cfg.openRouterApiKey}),
     personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
     personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,

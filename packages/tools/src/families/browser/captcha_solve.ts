@@ -34,7 +34,7 @@ function captchaKey(): string {
   return effectiveHarnessEnvRaw("AGENT_CAPTCHA_KEY")?.trim() ?? "";
 }
 
-function captchaService(): CaptchaService {
+export function captchaService(): CaptchaService {
   const s = effectiveHarnessEnvRaw("AGENT_CAPTCHA_SERVICE")?.trim().toLowerCase() ?? "";
   return s === "capsolver" ? "capsolver" : "2captcha";
 }

@@ -493,7 +493,7 @@ export async function applyPersonaProfileToHarness(harness: AgentHarness, profil
   // The profile is the canonical runtime voice. Soul files remain editable
   // reference artifacts; repeating their contents creates competing instructions.
   const block = buildRichPersonaBlock(profile);
-  const notes = slices.living?.replace(DEFAULT_LIVING_HEADER, '').replace(/^# Persona living notes\s*/, '').trim();
+  const notes = slices.living?.replace(DEFAULT_LIVING_HEADER.trim(), '').replace(/^# Persona living notes\s*/, '').trim();
   harness.setPersona(
     {
       name: profile.name,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {createChatMetadata,readChatMetadata,updateChatMetadata} from '@liminal/core';
+import {AgentEmitter,createChatMetadata,readChatMetadata,updateChatMetadata} from '@liminal/core';
 import {AgentBridge} from './agentBridge.js';
 
 test('web resume preserves recency and an accepted voice/text message updates it',async()=>{
@@ -14,7 +14,7 @@ test('web resume preserves recency and an accepted voice/text message updates it
   await updateChatMetadata('history',meta=>({...meta,updatedAt:100}));
   const bridge=Object.create(AgentBridge.prototype) as any;
   const events:string[]=[];bridge.chatId='history';bridge.workspaceRoot=root;bridge.sse={send:(event:string)=>events.push(event)};
-  bridge.harness={getIsRunning:()=>false,send:async()=>{}};bridge.startHeartbeat=()=>{};
+  bridge.harness={emitter:new AgentEmitter(),getIsRunning:()=>false,send:async()=>{bridge.harness.emitter.emit("send_start",{userMessage:"Spoken message",agentDepth:0});}};bridge.startHeartbeat=()=>{};
   await bridge.resumeSSE();assert.equal((await readChatMetadata('history'))!.updatedAt,100);
   await bridge.sendUserMessage('Spoken message',{liveDictation:true});
   await updateChatMetadata('history',meta=>meta);

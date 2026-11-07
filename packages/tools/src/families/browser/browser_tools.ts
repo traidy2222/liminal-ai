@@ -1,3 +1,4 @@
+import {captchaService} from './captcha_solve.js';
 /**
  * Playwright browser tools — session-based agentic workflow (see browser_runtime.ts).
  */
@@ -566,9 +567,9 @@ export const browserTabsTool = defineTool({
     const task = harness?.taskId ?? "anonymous";
     const state = browserWorkspaceState(task);
     const captchaSolver = effectiveHarnessEnvRaw('AGENT_CAPTCHA_KEY')?.trim() ? {
-      token_tool:'captcha_solve', inspect_tool:'captcha_inspect', service:effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')?.trim()||'2captcha',
-      supported_types:['recaptcha_v2','recaptcha_v3','hcaptcha','turnstile','image',...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?[]:['coordinates'])],
-      ...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?{}:{drag_tool:'captcha_drag'}),
+      token_tool:'captcha_solve', inspect_tool:'captcha_inspect', service:captchaService(),
+      supported_types:['recaptcha_v2','recaptcha_v3','hcaptcha','turnstile','image',...(captchaService()==='capsolver'?[]:['coordinates'])],
+      ...(captchaService()==='capsolver'?{}:{drag_tool:'captcha_drag'}),
     } : undefined;
     return { ok: true, output: JSON.stringify({ profile: "default", selectedTabId: state.selectedTabId && harness ? modelSessionId(state.selectedTabId) : state.selectedTabId, tabs: state.tabs.map(t=>({session_id:harness?modelSessionId(t.sessionId):t.sessionId,title:t.title,url:t.url,paused:t.paused,suspended:t.suspended})),captchaSolver }) };
   },
@@ -841,7 +842,7 @@ for(const tool of [browserOpenTool,browserSearchTool,browserTabsTool,browserSnap
   if(tool===browserCredentialsTool&&args.action==='accounts')return handler(args,emit,harness,context);
   const taskId=harness?.taskId??'anonymous',nested=isCurrentBrowserTask(taskId);
   return withBrowserTask(taskId,async()=>{
-   if(harness){harness.registry?.activate(['captcha_inspect']);if(effectiveHarnessEnvRaw('AGENT_CAPTCHA_KEY')?.trim())harness.registry?.activate(['captcha_solve',...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?[]:['captcha_drag'])]);}
+   if(harness){harness.registry?.activate(['captcha_inspect']);if(effectiveHarnessEnvRaw('AGENT_CAPTCHA_KEY')?.trim())harness.registry?.activate(['captcha_solve',...(captchaService()==='capsolver'?[]:['captcha_drag'])]);}
    const result=await handler(args,emit,harness,context);
    return nested?result:attachBrowserImage(harness,tool.name,result);
  });

@@ -30,7 +30,7 @@ export async function attachBrowserImage(harness:AgentHarness|undefined,toolName
   const old=known.get(key);
   if(old?.hash!==hash||old.url!==url||!harness.getContext().hasImageObservation(key)){
    const viewport=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));
-   const attached=await attachNativeImage(harness,'data:image/jpeg;base64,'+bytes.toString('base64'),`${toolName} resulting viewport\nURL: ${url}\nObserved: ${new Date().toISOString()}\nViewport: ${viewport.width} × ${viewport.height} CSS pixels; click_at uses this coordinate space.\nPassword fields are masked.`,key);
+   const attached=await attachNativeImage(harness,'data:image/jpeg;base64,'+bytes.toString('base64'),`${toolName} resulting viewport\nURL: ${url}\nObserved: ${new Date().toISOString()}\nViewport: ${viewport.width} × ${viewport.height} CSS pixels; click_at uses this coordinate space.\nRecognized password fields are masked.`,key);
    if(!attached.ok){harness.getContext().removeImageObservation(key);known.delete(key);clearBrowserPanelFrame(id);return result.ok?{...result,output:result.output+'\nNATIVE_BROWSER_IMAGE_UNAVAILABLE: '+attached.error}:result;}
    known.delete(key);known.set(key,{hash,url});while(known.size>2)known.delete(known.keys().next().value!);
   }

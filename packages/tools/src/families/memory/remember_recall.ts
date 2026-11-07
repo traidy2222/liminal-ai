@@ -106,7 +106,7 @@ export const rememberTool = defineTool({
 
     const stored=(await loadRawNotes())[storageKey];
     try{const account=indexAccountMemory(storageKey,value,typeof stored==='object'?stored.scope:scopeArg,harness?.taskId);
-      if(harness?.taskId&&account?.credentialId&&account.sourceChat===harness.taskId)updateBrowserLoginUsername(account.credentialId,account.username);
+      if(harness?.taskId&&account?.credentialId&&account.sourceChat===harness.taskId)updateBrowserLoginUsername(account.credentialId,account.username,account.origin);
     }catch{/* Account indexing must not invalidate a saved note. */}
     // Graph link inference runs by default (AGENT_MEMORY_GRAPH=0 to disable).
     // This makes related notes discoverable via neighbor expansion in recall_relevant

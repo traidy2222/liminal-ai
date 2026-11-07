@@ -31,6 +31,7 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 - **Accurate verification state** — Detect supported visible verification widgets, show configured solver availability without submitting a paid task, and distinguish solution application, form submission and actual site acceptance. An unavailable callback or response field no longer reports a successful application.
 - **Simpler first run and persona generation** — Verify cloud or local model access before persona generation, validate persona names and generated data, preserve the active persona on interrupted generation, and stop repeated bootstrap requests in established chats.
 - **Responsive desktop presentation** — Improve background WebView rendering and resource ownership, chat focus and prompt display during real runs, automatic following of active output, and chronological message replay.
+- **Review hardening** — Keep revealed login fields private, isolate preference refresh failures, preserve managed setup, and make concurrent web retries share the original admission result.
 - **Shorter spoken segments** — Bound long narration sentences and tool-boundary speech flushes into manageable clips, preserving text order and natural word boundaries while tools continue.
 - **Docs** — [Browser automation](../guides/browser-automation.md), [Persona system](../concepts/persona-system.md), [Voice and wake listening](../guides/voice.md)
 

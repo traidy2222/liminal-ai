@@ -114,7 +114,8 @@ export class ChatRegistry {
     this.cachedRuntimePrefs = merged;
     this.deps.runtimePreferences = merged;
     for (const slot of this.slots.values()) {
-      await slot.bridge.synchronizePreferences(merged);
+      try { await slot.bridge.synchronizePreferences(merged); }
+      catch { console.warn("[chat_registry] A chat could not refresh saved preferences; it will retry when opened."); }
     }
     return merged;
   }

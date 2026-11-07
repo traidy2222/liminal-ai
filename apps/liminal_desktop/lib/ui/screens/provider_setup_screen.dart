@@ -29,9 +29,14 @@ class _SetupScreenState extends State<SetupScreen> {
     _savedBase = cfg.providerBaseUrl;
     if (cfg.providerBaseUrl.isNotEmpty) _base.text = cfg.providerBaseUrl;
     _model.text = cfg.providerModel;
-    _local =
-        Uri.tryParse(_base.text)?.host == 'localhost' ||
-        RegExp(r'^127\.').hasMatch(Uri.tryParse(_base.text)?.host ?? '');
+    final host = Uri.tryParse(_base.text)?.host.toLowerCase() ?? '';
+    final octets = host.split('.').map(int.tryParse).toList();
+    final ipv4 = RegExp(r'^\d{1,3}(?:\.\d{1,3}){3}$').hasMatch(host) &&
+        octets.every((part) => part != null && part >= 0 && part <= 255);
+    _local = host == 'localhost' || host == '::1' ||
+        (ipv4 && (octets[0] == 127 || octets[0] == 10 ||
+            (octets[0] == 192 && octets[1] == 168) ||
+            (octets[0] == 172 && octets[1]! >= 16 && octets[1]! <= 31)));
   }
 
   bool get _canReuseKey =>

@@ -6,6 +6,7 @@ class AppConfig {
   AppConfig({
     required this.apiKeyConfigured,
     this.providerVerified = false,
+    this.providerManaged = false,
     required this.personaBootstrapEnabled,
     required this.personaBootstrapPending,
     required this.personaBootstrapAllowSkip,
@@ -29,6 +30,7 @@ class AppConfig {
 
   final bool apiKeyConfigured;
   final bool providerVerified;
+  final bool providerManaged;
   final bool personaBootstrapEnabled;
   final bool personaBootstrapPending;
   final bool personaBootstrapAllowSkip;
@@ -69,6 +71,7 @@ class AppConfig {
   AppConfig copyWith({
     bool? apiKeyConfigured,
     bool? providerVerified,
+    bool? providerManaged,
     bool? personaBootstrapEnabled,
     bool? personaBootstrapPending,
     bool? personaBootstrapAllowSkip,
@@ -92,6 +95,7 @@ class AppConfig {
     return AppConfig(
       apiKeyConfigured: apiKeyConfigured ?? this.apiKeyConfigured,
       providerVerified: providerVerified ?? this.providerVerified,
+      providerManaged: providerManaged ?? this.providerManaged,
       personaBootstrapEnabled:
           personaBootstrapEnabled ?? this.personaBootstrapEnabled,
       personaBootstrapPending:
@@ -133,6 +137,7 @@ class AppConfig {
     return AppConfig(
       apiKeyConfigured: json['apiKeyConfigured'] as bool? ?? false,
       providerVerified: json['providerVerified'] as bool? ?? false,
+      providerManaged: json['providerManaged'] as bool? ?? false,
       personaBootstrapEnabled: json['personaBootstrapEnabled'] as bool? ?? true,
       personaBootstrapPending:
           json['personaBootstrapPending'] as bool? ?? false,

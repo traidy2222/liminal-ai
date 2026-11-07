@@ -161,6 +161,8 @@ export function createRouter(
 ): Router {
   const router = Router();
   const acceptedMessageIds = new Set<string>();
+  type MessageAdmission = { status: number; body: { ok: true } | { error: string } };
+  const inFlightAdmissions = new Map<string, Promise<MessageAdmission>>();
 
   /** Convenience wrapper — every chat-scoped route calls this. */
   const active = () => chatManager.getActive();
@@ -207,6 +209,7 @@ export function createRouter(
       res.json({
         webAuthToken: localAuth.token,
         providerConfigured:providerConnectionConfigured(bridge.harness.config.openRouterApiKey),
+        providerManaged: resolveInferenceMode(prefs) === "managed",
         providerVerified:await providerSetupVerified({baseURL:bridge.harness.config.baseURL,model:bridge.harness.config.model,apiKey:bridge.harness.config.openRouterApiKey}),
         providerSetup:{baseURL:bridge.harness.config.baseURL,model:bridge.harness.config.model,local:isLocalProviderUrl(bridge.harness.config.baseURL??'')},
         uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
@@ -1506,20 +1509,29 @@ export function createRouter(
     let bridge: ReturnType<typeof active> | undefined;
     let reserved = false;
     let handedOff = false;
+    const requestId=typeof req.body?.requestId==='string'&&req.body.requestId ? req.body.requestId : undefined;
+    let settleAdmission: ((result: MessageAdmission) => void) | undefined;
+    const respond = (status: number, body: MessageAdmission["body"]) => {
+      settleAdmission?.({status,body});
+      if (!res.headersSent) res.status(status).json(body);
+    };
     try {
-    const requestId=typeof req.body?.requestId==='string'?req.body.requestId:undefined;
-    if(requestId&&acceptedMessageIds.has(requestId)){res.json({ok:true});return;}
+    if (requestId && requestId.length > 160) { respond(400,{error:"Invalid message request ID"});return; }
+    const pending = requestId ? inFlightAdmissions.get(requestId) : undefined;
+    if (pending) { const result=await pending;respond(result.status,result.body);return; }
+    if(requestId&&acceptedMessageIds.has(requestId)){respond(200,{ok:true});return;}
     bridge = active();
-    if(requestId&&bridge.hasAcceptedRequest(requestId)){res.json({ok:true});return;}
+    if(requestId&&bridge.hasAcceptedRequest(requestId)){respond(200,{ok:true});return;}
     if (pendingMessages.has(bridge) || bridge.isBusy) {
-      res.status(409).json({ error: "Agent is already processing a message" });
+      respond(409,{ error: "Agent is already processing a message" });
       return;
     }
     pendingMessages.add(bridge);
     reserved = true;
+    if (requestId) inFlightAdmissions.set(requestId, new Promise(resolve => { settleAdmission = resolve; }));
     await bridge.whenSessionReady();
     if (bridge.isAwaitingPersonaBootstrap) {
-      res.status(409).json({ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
+      respond(409,{ error: "Persona bootstrap is pending. Submit via bootstrap modal." });
       return;
     }
     const { message, freshContext, attachments, liveDictation, workflowPreset } = (req.body ?? {}) as {
@@ -1530,7 +1542,7 @@ export function createRouter(
       workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     };
     if (attachments != null && !Array.isArray(attachments)) {
-      res.status(400).json({ error: "attachments must be an array" });
+      respond(400,{ error: "attachments must be an array" });
       return;
     }
     const msg = String(message ?? "").trim();
@@ -1539,7 +1551,7 @@ export function createRouter(
       const dataUrl = String(item?.dataUrl ?? "").trim();
       const parsed = parseDataUrlAttachment(dataUrl);
       if (!parsed.ok) {
-        res.status(400).json({ error: parsed.error });
+        respond(400,{ error: parsed.error });
         return;
       }
       const declaredMime = String((item as { mimeType?: string })?.mimeType ?? "").trim().toLowerCase();
@@ -1556,40 +1568,48 @@ export function createRouter(
       DEFAULT_CHAT_ATTACHMENT_LIMITS
     );
     if (!validation.ok) {
-      res.status(400).json({ error: validation.error });
+      respond(400,{ error: validation.error });
       return;
     }
     if (!msg && normalizedAttachments.length === 0) {
-      res.status(400).json({ error: "message or attachments required" });
+      respond(400,{ error: "message or attachments required" });
       return;
     }
     if (workflowPreset === "receipt_to_xero" && partitionChatAttachments(normalizedAttachments).images.length === 0) {
-      res.status(400).json({ error: "Process receipts requires at least one image attachment." });
+      respond(400,{ error: "Process receipts requires at least one image attachment." });
       return;
     }
     if (bridge.harness.getIsRunning()) {
-      res.status(409).json({ error: "Agent is already processing a message" });
+      respond(409,{ error: "Agent is already processing a message" });
       return;
     }
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const admittedBridge = bridge;
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    let didStart = false;
     const send = admittedBridge.sendUserMessage(msg, {
         requestId,
+        onStart: () => { didStart = true; markStarted(); },
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
         chatAttachments: persisted,
         workflowPreset,
       });
     handedOff = true;
-    if(requestId){acceptedMessageIds.add(requestId);if(acceptedMessageIds.size>256)acceptedMessageIds.delete(acceptedMessageIds.values().next().value!);}
     void send.catch((err) => {
+      if (!didStart) return; // Admission returns the failure to the caller.
       const message = err instanceof Error ? err.message : "Failed to process message.";
       sse.send("error", { message }, admittedBridge.chatId);
     }).finally(() => pendingMessages.delete(admittedBridge));
-    res.json({ ok: true });
+    // Wait only for the harness to accept the turn, not for its model reply.
+    await Promise.race([started, send]);
+    if(requestId){acceptedMessageIds.add(requestId);if(acceptedMessageIds.size>256)acceptedMessageIds.delete(acceptedMessageIds.values().next().value!);}
+    respond(200,{ok:true});
     } catch (err) {
-      if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : "Failed to accept message." });
+      respond(500,{error:err instanceof Error ? err.message : "Failed to accept message."});
     } finally {
+      if (settleAdmission && requestId) inFlightAdmissions.delete(requestId);
       if (reserved && bridge && !handedOff) pendingMessages.delete(bridge);
     }
   });

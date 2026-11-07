@@ -544,6 +544,7 @@ export class AgentBridge {
     message: string,
     opts?: {
       requestId?:string;
+      onStart?: () => void;
       freshContext?: boolean;
       liveDictation?: boolean;
       chatAttachments?: import("@liminal/core").ChatFileAttachment[];
@@ -557,22 +558,34 @@ export class AgentBridge {
       throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
     }
     if(this.isBusy)throw new Error('Agent is busy; finish the current turn first.');
-    this.rememberAcceptedRequest(opts?.requestId);
-    void touchChatMetadata(this.chatId).then(()=>{
-      this.sse.send('chat_activity',{chatId:this.chatId},this.chatId);
-    }).catch(() => undefined);
+    if (opts?.requestId && (typeof opts.requestId !== "string" || opts.requestId.length > 160)) {
+      throw Error("Invalid message request ID");
+    }
+    const accept = () => {
+      this.harness.emitter.off("send_start", accept);
+      this.rememberAcceptedRequest(opts?.requestId);
+      opts?.onStart?.();
+      void touchChatMetadata(this.chatId).then(() => {
+        this.sse.send("chat_activity", {chatId:this.chatId}, this.chatId);
+      }).catch(() => undefined);
+    };
     // Pin the workspace for the whole send so file tools, repo_map, world_context,
     // etc. resolve relative to this chat's bound folder rather than the server's cwd.
-    await runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      const run = this.harness.send(message, {
-        freshContext: opts?.freshContext,
-        liveDictation: opts?.liveDictation,
-        chatAttachments: opts?.chatAttachments ?? opts?.imageAttachments,
-        workflowPreset: opts?.workflowPreset,
+    this.harness.emitter.on("send_start", accept);
+    try {
+      await runWithWorkspaceRoot(this.workspaceRoot, async () => {
+        const run = this.harness.send(message, {
+          freshContext: opts?.freshContext,
+          liveDictation: opts?.liveDictation,
+          chatAttachments: opts?.chatAttachments ?? opts?.imageAttachments,
+          workflowPreset: opts?.workflowPreset,
+        });
+        this.startHeartbeat();
+        await run;
       });
-      this.startHeartbeat();
-      await run;
-    });
+    } finally {
+      this.harness.emitter.off("send_start", accept);
+    }
     if (this.lastTurnSucceeded) void autoTitleAfterTurn(this.harness, message).then(meta => {
       if (meta) this.sse.send("chat_title_updated", { chatId: meta.chatId, title: meta.title });
     }).catch(() => undefined);

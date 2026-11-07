@@ -2982,6 +2982,11 @@ export class AgentHarness {
     tools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
   ): Promise<Message[]> {
     await this.syncContextWindowForModel(modelSlug);
+    const filterImages = async (input: Message[]) =>
+      input.some(m => Array.isArray(m.content) && m.content.some(p => p.type === "image_url"))
+        && !await modelSupportsNativeVisionAsync(modelSlug, this.config.baseURL)
+        ? omitUnsupportedImagePixels(input) : input;
+    messages = await filterImages(messages);
     const policy = this.context.getActiveContextPolicy();
     const window =
       this.activeContextLimits?.contextLength ?? resolveModelContextWindowTokens(modelSlug);
@@ -3000,7 +3005,7 @@ export class AgentHarness {
       this.context.forceCompress(
         `Context near model limit (~${inputTokens}/${window} tokens) — compressing before completion`
       );
-      messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
+      messages = await filterImages(scrubMessagesSpecialTokens(await this.context.buildMessages()));
       inputTokens = estimateRequestTokens(messages, tools);
     }
     return messages;
@@ -5186,8 +5191,9 @@ export class AgentHarness {
   /** End a bounded run with an evidence-grounded handoff, never extra effects.
    * The termination remains round_cap; a summary is not proof of completion. */
   /** No action tools or persisted nudges: fill an empty answer once, then stop. */
-  private async writeMissingFinalReply():Promise<void>{
+  private async writeMissingFinalReply():Promise<boolean>{
     const accumulator=new StreamAccumulator();
+    let failed=false;
     try{
       const messages=await this.prepareMessagesForContextLimit([...await this.context.buildMessages(),{role:'system',content:USER_REPLY_FINALIZE_SYSTEM}],this.config.model,[]);
       const stream=await this.streamWithRetry(messages,[],undefined,this._turnReasoningBudget,undefined,this._turnReasoningSurface);
@@ -5197,10 +5203,13 @@ export class AgentHarness {
       accumulator.finishInlineReasoning();
     }catch(error){
       if(this.abortSignal?.aborted||this.currentTurnController?.signal.aborted)throw error;
+      failed=true;
+      this.emitter.emit('text',{channel:'trace',delta:'[final reply] The tool-free reply stream failed.'});
     }
     const reply=accumulator.accumulatedText.trim()||'Tool work has stopped. No final response was returned.';
     this.context.appendMessage({role:'assistant',content:reply});
     this.emitter.emit('text',{channel:'user',delta:reply});
+    return !failed && !!accumulator.accumulatedText.trim();
   }
 
   private async finalizeAtToolRoundLimit(requiredHandoff?: string): Promise<void> {
@@ -5793,7 +5802,6 @@ export class AgentHarness {
     const hasImageInput=messages.some(message=>Array.isArray(message.content)&&message.content.some(part=>part.type==='image_url'));
     const routingModel = routingProfile.applied && !hasImageInput ? routingProfile.modelSlug : undefined;
     const activeModelSlug = routingModel ?? this.config.model;
-    if(hasImageInput&&!await modelSupportsNativeVisionAsync(activeModelSlug,this.config.baseURL))messages=omitUnsupportedImagePixels(messages);
     this.emitContextSnapshot(tools, activeModelSlug);
     this.contextOverflowRecoveredThisRound = false;
     this.streamContextOverflowRecoveries = 0;
@@ -7325,7 +7333,10 @@ export class AgentHarness {
         })
       ) {
         this.userReplyFinalizeAttempted = true;
-        await this.writeMissingFinalReply();
+        if (!await this.writeMissingFinalReply()) {
+          this.emitTurnEnd("error");
+          return;
+        }
       }
 
       assertTurnActive();

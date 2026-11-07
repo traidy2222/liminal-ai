@@ -348,7 +348,7 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> _openSessionStream() async {
-    if (!sessionActive || _suspendedForTts || _endpointInFlight) return;
+    if (_disposed || !sessionActive || _suspendedForTts || _endpointInFlight) return;
     if (_streamLive) return;
 
     _vad ??= AmplitudeVad(
@@ -369,7 +369,7 @@ class DictationController extends ChangeNotifier {
 
     try {
       final stream = await _recorder.startStream(_streamConfig);
-      if (!sessionActive || _suspendedForTts) {
+      if (_disposed || !sessionActive || _suspendedForTts) {
         await _recorder.cancel();
         return;
       }
@@ -393,6 +393,7 @@ class DictationController extends ChangeNotifier {
       autoSendCountdownMs = null;
       notifyListeners();
     } catch (e) {
+      if (_disposed) return;
       _streamLive = false;
       _stopAmplitudePolling();
       if (!_endpointInFlight) {
@@ -458,7 +459,7 @@ class DictationController extends ChangeNotifier {
   }
 
   Future<void> _handleStreamLost() async {
-    if (!sessionActive || _suspendedForTts || _endpointInFlight) {
+    if (_disposed || !sessionActive || _suspendedForTts || _endpointInFlight) {
       _streamLive = false;
       return;
     }
@@ -716,6 +717,7 @@ class DictationController extends ChangeNotifier {
     onSessionActiveChange = null;
     onAutoSend = null;
     _disposed = true;
+    sessionActive = false;
     _sessionGeneration++;
     _audioClient?.cancelTranscriptionRequests();
     _resetPreview();

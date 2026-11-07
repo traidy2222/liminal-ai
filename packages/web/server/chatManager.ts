@@ -167,7 +167,10 @@ export class ChatManager {
         this.sse,
         { chatId, workspaceRoot: meta.workspaceRoot, onPreferencesSaved: async prefs=>{
           this.cachedRuntimePrefs=prefs;
-          for(const existing of this.bridges.values())await existing.bridge.synchronizePreferences(prefs);
+          for (const existing of this.bridges.values()) {
+            try { await existing.bridge.synchronizePreferences(prefs); }
+            catch { console.warn("[chatManager] A chat could not refresh saved preferences; it will retry when opened."); }
+          }
         } },
         this.cachedRuntimePrefs,
         provider

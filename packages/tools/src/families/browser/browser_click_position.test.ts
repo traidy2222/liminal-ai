@@ -58,3 +58,13 @@ test('named regions provide observed hover anchors for controls revealed only on
  const browser=await chromium.launch({headless:true});try{const page=await browser.newPage();await page.setContent('<style>section{width:500px;height:100px}section button{opacity:0}section:hover button{opacity:1}</style><h1>Launch workspace</h1><section aria-label="Launch"><h2>Launch</h2><button>Add task</button></section>');const before=await buildPageSnapshot(page);assert.match(before.snapshotText,/region "Launch"[^\n]*container=true/);assert.doesNotMatch(before.snapshotText,/button "Add task"/);const region=[...before.refs.values()].find(r=>r.role==='region'&&r.name==='Launch');assert.ok(region?.selector);await page.locator(region.selector).hover();const after=await buildPageSnapshot(page);assert.match(after.snapshotText,/button "Add task"[^\n]*section="Launch"/);
  }finally{await browser.close();}
 });
+
+test('a button host with an open shadow root can be clicked by its observed control',async()=>{
+ const browser=await chromium.launch({headless:true});try{
+  const page=await browser.newPage();
+  await page.setContent('<div id="host" role="button" aria-label="Open settings" style="display:block;width:160px;height:48px"></div>');
+  await page.locator('#host').evaluate(el=>{el.attachShadow({mode:'open'}).innerHTML='<span style="display:block;width:100%;height:100%">Open settings</span>';el.addEventListener('click',()=>el.setAttribute('data-clicked','yes'));});
+  await clickBrowserControl(page,page.getByRole('button',{name:'Open settings'}),1500);
+  assert.equal(await page.locator('#host').getAttribute('data-clicked'),'yes');
+ }finally{await browser.close();}
+});
