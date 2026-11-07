@@ -7340,8 +7340,7 @@ export class AgentHarness {
       }
 
       assertTurnActive();
-      if(finalReviewEnabled){
-      if (artifactInvestigation?.requiredReports.length) {
+      if (finalReviewEnabled && artifactInvestigation?.requiredReports.length) {
         const reportVerification = await artifactInvestigation.verifyReports();
         assertTurnActive();
         if (!reportVerification.allPersistedValid) {
@@ -7358,9 +7357,8 @@ export class AgentHarness {
           return;
         }
       }
-      }
-      // An explicitly requested tool is unfinished task scope, independent of
-      // optional post-completion report/cleanup reviews.
+      // An explicitly requested tool is unfinished scope even if the optional
+      // evidence review is disabled.
       const missingConnectors = missingArtifactConnectors(this.requestedArtifactConnectorsThisSend, this.toolsUsedThisTurn, this.registry);
       if (missingConnectors.length) {
         if (!this.artifactConnectorContinuationAttempted) {
@@ -7375,14 +7373,14 @@ export class AgentHarness {
         this.emitTurnEnd("error");
         return;
       }
-      if(finalReviewEnabled){
-      if (artifactInvestigation && !this.artifactEvidenceReviewAttempted &&
+      if (finalReviewEnabled && artifactInvestigation && !this.artifactEvidenceReviewAttempted &&
         (artifactInvestigation.requiredReports.length || artifactInvestigation.pendingNativeCleanup().length)) {
         this.artifactEvidenceReviewAttempted = true;
         this.context.appendMessage({role: "user", content: artifactInvestigation.evidenceReviewGuidance()});
         await this.runReActLoop(round + 1);
         return;
       }
+      // Release resources opened by this turn independently of report review.
       const pendingNativeCleanup = artifactInvestigation?.pendingNativeCleanup() ?? [];
       if (pendingNativeCleanup.length) {
         if (!this.artifactCleanupContinuationAttempted) {
@@ -7396,7 +7394,6 @@ export class AgentHarness {
         this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
         this.emitTurnEnd("error");
         return;
-      }
       }
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
