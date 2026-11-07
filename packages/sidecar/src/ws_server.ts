@@ -440,10 +440,11 @@ export class WsServer {
     });
   }
 
-  private broadcast(frame: ServerFrame): void {
+  private broadcast(frame: ServerFrame, exclude?: WebSocket): void {
     const payload = JSON.stringify(frame);
     this.cloudRelay.forward(payload);
     for (const ws of this.clients) {
+      if (ws === exclude) continue;
       if (ws.readyState !== WebSocket.OPEN) continue;
       const meta = this.clientMeta.get(ws);
       if (meta?.role !== "owner" && (!meta?.chatId || !frame.chatId || frame.chatId !== meta.chatId)) {
@@ -767,6 +768,7 @@ export class WsServer {
 
         case "send_message": {
           const d = data as {
+            requestId?:string;
             chatId: string;
             message: string;
             freshContext?: boolean;
@@ -782,6 +784,10 @@ export class WsServer {
           if (!msg && att.attachments.length === 0) {
             return this.ack(ws, id, false, "message or attachments required");
           }
+          if (d.requestId !== undefined && (typeof d.requestId !== "string" || d.requestId.length > 160)) {
+            return this.ack(ws, id, false, "Invalid message request ID");
+          }
+            if(d.requestId&&bridge.hasAcceptedRequest(d.requestId)){this.ack(ws,id,true);return;}
             if (bridge.isAwaitingPersonaBootstrap) {
               return this.ack(ws, id, false, "Complete persona setup before chatting.");
             }
@@ -789,8 +795,19 @@ export class WsServer {
               return this.ack(ws, id, false, "Agent is busy; finish the current turn first.");
             }
           this.ack(ws, id, true);
+          // The originating UI already inserted its optimistic user bubble.
+          // Other windows (including the desktop watching a background runner)
+          // need the accepted prompt before assistant/tool events begin.
+          this.broadcast(serverFrame("user_message", {
+            text: msg,
+            ...(d.requestId ? { requestId: d.requestId } : {}),
+            ...(att.attachments.length ? {
+              attachmentPreviews: att.attachments.map(attachment => ({ name: attachment.name })),
+            } : {}),
+          }, d.chatId), ws);
           bridge
             .sendUserMessage(msg, {
+              requestId:d.requestId,
               freshContext: d.freshContext,
               liveDictation: d.liveDictation,
               chatAttachments: att.attachments,
@@ -930,10 +947,10 @@ export class WsServer {
         }
 
         case "submit_persona_bootstrap": {
-          const d = data as { chatId: string; input: string; skip?: boolean };
+          const d = data as { chatId: string; input: string; skip?: boolean; name?:string };
           const bridge = this.registry.get(d.chatId);
           if (!bridge) return this.ack(ws, id, false, "Unknown chatId.");
-          await bridge.submitPersonaBootstrap(d.input, { skip: d.skip });
+          await bridge.submitPersonaBootstrap(d.input, { skip: d.skip, name:d.name });
           this.broadcastChatList();
           const config = await this.desktopConfig(bridge);
           this.ack(ws, id, true, undefined, wireAppConfig(config));

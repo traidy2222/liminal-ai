@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) are documented here and on the docs portal: [docs.vireondynamics.com/liminal/reference/changelog](https://docs.vireondynamics.com/liminal/reference/changelog).
 
-**Current stage:** **beta** (`v0.1.27` tip of `main`, 2026-11-06). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.28` tip of `main`, 2026-11-07). Desktop downloads are published through the public preview release channel.
 
 **Single source:** edit [`changelog/releases.json`](changelog/releases.json), then run `npm run changelog:gen`.
 
@@ -10,7 +10,13 @@ Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates ar
 
 Marketing (richer notes): [vireondynamics.com/liminal/changelog](https://www.vireondynamics.com/liminal/changelog)
 
-## [v0.1.27] — 2026-11-06 — Current beta
+## [v0.1.28] — 2026-11-07 — Current beta
+
+Improve desktop and web setup, persona generation, native visual browsing, account and credential continuity, completion tracking, and short streamed narration. Repair the concrete control, extraction and conversation failures found during live browser work.
+
+[Full notes](https://docs.vireondynamics.com/liminal/reference/changelog#v0-1-28)
+
+## [v0.1.27] — 2026-11-06
 
 Bring the accumulated desktop and web improvements together: persistent per-chat browsing, cloud or local setup, value-based provider routing and cache telemetry, hands-free voice, and experimental verified procedures.
 

@@ -94,6 +94,7 @@ function writeFireAndForget(sessionId: string, record: Record<string, unknown>):
 export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string): () => void {
   let assistantRollup = "";
   let turnIndex = 0;
+  let turnClosed = false;
 
   const write = (record: Record<string, unknown>) => {
     writeFireAndForget(sessionId, record);
@@ -109,6 +110,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
 
   const onSendStart = (p: AgentEventMap["send_start"]) => {
     assistantRollup = "";
+    turnClosed = false;
     turnIndex += 1;
     write({
       event: "send_start",
@@ -119,11 +121,13 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   };
 
   const onToolStart = (p: AgentEventMap["tool_start"]) => {
+    if(turnClosed)return;
     flushAssistant();
     write({ event: "tool_start", turnIndex, callId: p.callId, name: p.name });
   };
 
   const onToolResult = (p: AgentEventMap["tool_result"]) => {
+    if(turnClosed)return;
     flushAssistant();
     const out =
       p.result.ok === true
@@ -152,6 +156,7 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   };
 
   const onTurnEnd = (p: AgentEventMap["turn_end"]) => {
+    turnClosed = true;
     flushAssistant();
     write({event: "turn_end", turnIndex, durationMs: p.durationMs,
       tokenCount: p.contextSnapshot.tokenCount, usageFraction: p.contextSnapshot.usageFraction,
@@ -159,12 +164,14 @@ export function attachSessionEventLog(emitter: AgentEmitter, sessionId: string):
   };
 
   const onError = (p: AgentEventMap["error"]) => {
+    turnClosed = true;
     flushAssistant("text_rollup_partial");
     write({event: "error", turnIndex, message: truncate(p.err.message, 4000)});
   };
 
   const onText = (p: AgentEventMap["text"]) => {
     const channel = p.channel ?? "user";
+    if(turnClosed && channel!=="trace")return;
     const mode = resolveSessionTextLogMode();
 
     if (channel === "trace" && !sessionTraceLogEnabled()) {

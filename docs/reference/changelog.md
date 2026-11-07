@@ -2,7 +2,7 @@
 
 All notable changes to [Liminal AI](https://github.com/traidy2222/liminal-ai) on the `main` branch.
 
-**Current stage:** **beta** (`v0.1.27`, 2026-11-06). Desktop downloads are published through the public preview release channel.
+**Current stage:** **beta** (`v0.1.28`, 2026-11-07). Desktop downloads are published through the public preview release channel.
 
 Format: **v0.0.x** entries keyed to the last GitHub push in each slice. Dates are real push dates.
 
@@ -17,9 +17,29 @@ After editing JSON: `npm run changelog:gen`, commit, push, then in [vireondynami
 
 ---
 
+## v0.1.28 — 2026-11-07 {#v0-1-28}
+
+**Current beta.** Browser work that keeps its context and knows what is finished.
+
+**Shipped**
+
+- **Clear completion and conversation boundaries** — Track requested outcomes against observed results, keep unfinished work visible, prevent late events from reviving finished turns, and separate useful narration from tool groups without empty assistant bubbles.
+- **Native browser images** — Send masked viewport images directly to compatible main models, preserve the correct tab and image ordering after failed actions, and remove stale images when fresh capture fails. Separate vision-sidecar analysis is no longer part of the browser flow.
+- **More reliable browser controls** — Improve embedded-frame feedback, native labels, covered controls, nested scrolling, drag and hold gestures, stable references, and safe wait arguments. Disabled or fully covered targets fail promptly with useful current state.
+- **Readable evidence and copied links** — Preserve words split across editor spans, match multi-word queries within relevant passages and table rows, retain dated source evidence, and return links written by a page’s copy action, including Markdown and temporary-field copying. The existing system clipboard is not read.
+- **Accounts that survive new chats** — Share account metadata and encrypted credential references across conversations. Distinguish a stored generated password from one actually filled, preserve unknown authentication methods, and allow a signed-in account to be recorded before its future login method is established.
+- **Accurate verification state** — Detect supported visible verification widgets, show configured solver availability without submitting a paid task, and distinguish solution application, form submission and actual site acceptance. An unavailable callback or response field no longer reports a successful application.
+- **Simpler first run and persona generation** — Verify cloud or local model access before persona generation, validate persona names and generated data, preserve the active persona on interrupted generation, and stop repeated bootstrap requests in established chats.
+- **Responsive desktop presentation** — Improve background WebView rendering and resource ownership, chat focus and prompt display during real runs, automatic following of active output, and chronological message replay.
+- **Review hardening** — Keep revealed login fields private, isolate preference refresh failures, preserve managed setup, and make concurrent web retries share the original admission result.
+- **Shorter spoken segments** — Bound long narration sentences and tool-boundary speech flushes into manageable clips, preserving text order and natural word boundaries while tools continue.
+- **Docs** — [Browser automation](../guides/browser-automation.md), [Persona system](../concepts/persona-system.md), [Voice and wake listening](../guides/voice.md)
+
+---
+
 ## v0.1.27 — 2026-11-06 {#v0-1-27}
 
-**Current beta.** A more capable browser, a faster voice, and a simpler start.
+A more capable browser, a faster voice, and a simpler start.
 
 **Shipped**
 
@@ -784,15 +804,9 @@ Monorepo scaffold, AgentHarness, tools, TUI, web, eval, Liminal rebrand.
 
 ---
 
-## Planned (not started)
+## Next
 
-See the full [Roadmap](./roadmap.md) for what each milestone means.
-
-| Stage | Target | Status |
-|-------|--------|--------|
-| Beta | Stability + defaults freeze candidate | Not started |
-| RC | Ship checklist, docs freeze | Not started |
-| v0.1.0 | Public preview tag + install GA | Not started |
+Planned work and milestone definitions are tracked in the [Roadmap](./roadmap.md). Published desktop downloads and release availability are listed on [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases).
 
 ---
 

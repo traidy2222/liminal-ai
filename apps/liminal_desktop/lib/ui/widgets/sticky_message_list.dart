@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../../core/chat_visibility.dart';
 import '../../core/transcript_grouping.dart';
@@ -30,43 +31,31 @@ class StickyMessageList extends StatefulWidget {
 class _StickyMessageListState extends State<StickyMessageList> {
   final _scroll = ScrollController();
   static const _stickThreshold = 120.0;
+  bool _following = true;
+  bool _followScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeScrollToEnd();
+  }
 
   @override
   void didUpdateWidget(covariant StickyMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.messages.length != oldWidget.messages.length ||
-        _lastText(widget.messages) != _lastText(oldWidget.messages)) {
-      _maybeScrollToEnd();
-    }
-  }
-
-  String _lastText(List<MessageEntry> msgs) {
-    if (msgs.isEmpty) return '';
-    final last = msgs.last;
-    return switch (last) {
-      AssistantMessage(:final text) => text,
-      UserMessage(:final text) => text,
-      ThinkMessage(:final content) => content,
-      ModelReasoningMessage(:final text) => text,
-      _ => '',
-    };
-  }
-
-  bool get _nearBottom {
-    if (!_scroll.hasClients) return true;
-    final max = _scroll.position.maxScrollExtent;
-    return max - _scroll.offset <= _stickThreshold;
+    // Entries can stream in place; comparing old/new references misses growth.
+    _maybeScrollToEnd();
   }
 
   void _maybeScrollToEnd() {
-    if (!_nearBottom) return;
+    if (!_following || _followScheduled) return;
+    _followScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+      _followScheduled = false;
+      if (!mounted || !_following || !_scroll.hasClients) return;
+      if (_scroll.position.extentAfter > 1) {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
     });
   }
 
@@ -89,42 +78,61 @@ class _StickyMessageListState extends State<StickyMessageList> {
       return Center(
         child: Text(
           'Send a message to start.',
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: lim.textMuted,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyLarge?.copyWith(color: lim.textMuted),
         ),
       );
     }
 
-    return ListView.builder(
-      controller: _scroll,
-      padding: widget.padding,
-      primary: false,
-      itemCount: segments.length,
-      itemBuilder: (context, i) {
-        final segment = segments[i];
-        if (segment is TranscriptActivityGroupSegment) {
-          return WorkingActivityPanel(
-            entries: segment.entries,
-            verboseTools: widget.showRawHarness,
-            personaLabel: persona,
-            startExpanded: widget.showRawHarness,
-          );
+    return NotificationListener<UserScrollNotification>(
+      onNotification: (notification) {
+        if (notification.depth != 0) return false;
+        if (notification.direction == ScrollDirection.forward) {
+          _following = false;
+        } else if (notification.metrics.extentAfter <= _stickThreshold) {
+          _following = true;
         }
-        final entry = (segment as TranscriptMessageSegment).entry;
-        final tile = MessageTile(
-          entry: entry,
-          verboseTools: widget.showRawHarness,
-          personaLabel: persona,
-        );
-        if (isConversationMessage(entry)) {
-          return tile;
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: LiminalSpacing.xs),
-          child: tile,
-        );
+        return false;
       },
+      child: NotificationListener<ScrollMetricsNotification>(
+        onNotification: (notification) {
+          if (notification.depth == 0 && notification.metrics.extentAfter > 1) {
+            _maybeScrollToEnd();
+          }
+          return false;
+        },
+        child: ListView.builder(
+          controller: _scroll,
+          padding: widget.padding,
+          primary: false,
+          itemCount: segments.length,
+          itemBuilder: (context, i) {
+            final segment = segments[i];
+            if (segment is TranscriptActivityGroupSegment) {
+              return WorkingActivityPanel(
+                entries: segment.entries,
+                verboseTools: widget.showRawHarness,
+                personaLabel: persona,
+                startExpanded: widget.showRawHarness,
+              );
+            }
+            final entry = (segment as TranscriptMessageSegment).entry;
+            final tile = MessageTile(
+              entry: entry,
+              verboseTools: widget.showRawHarness,
+              personaLabel: persona,
+            );
+            if (isConversationMessage(entry)) {
+              return tile;
+            }
+            return Padding(
+              padding: const EdgeInsets.only(bottom: LiminalSpacing.xs),
+              child: tile,
+            );
+          },
+        ),
+      ),
     );
   }
 }

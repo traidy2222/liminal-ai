@@ -10,6 +10,7 @@ import {
   resolveWorkspaceRoot,
   runWithWorkspaceRoot,
   saveRuntimePreferences,
+  patchSavedRuntimePreferences,
   resolveHarnessEnvRaw,
   touchChatMetadata,
   autoTitleAfterTurn,
@@ -78,6 +79,7 @@ function resolveWorldContext(
 
 /** Per-bridge configuration. Each chat = one AgentBridge with its own workspace + harness. */
 export interface AgentBridgeOptions {
+  onPreferencesSaved?: (prefs:RuntimePreferences)=>Promise<void>;
   /** Chat / harness taskId. Stable across bridge restarts for the same chat. */
   chatId: string;
   /**
@@ -120,7 +122,7 @@ export class AgentBridge {
    * into the UI of an unrelated chat.
    */
   private sseSuspended = true;
-  private readonly bridgeRuntimePreferences: RuntimePreferences | null;
+  private bridgeRuntimePreferences: RuntimePreferences | null;
   /** Detach functions for all emitter subscriptions, so dispose() can fully unwire. */
   private emitterDetachers: Array<() => void> = [];
   /** True after session.jsonl was loaded into harness context once this bridge lifetime. */
@@ -173,11 +175,12 @@ export class AgentBridge {
         workingStateEnabled: true,
         worldContext: resolveWorldContext(runtimePreferences),
         runtimePreferences,
-        persistRuntimePreferences: async (prefs) =>
-          // Runtime prefs are user-global (Phase 1) — passing the chat's
-          // workspaceRoot still works because the global path resolver wins
-          // when the storage split is active.
-          saveRuntimePreferences(prefs, this.workspaceRoot),
+        persistRuntimePreferences: async (prefs,patch) => {
+          const saved=await patchSavedRuntimePreferences(patch??prefs,this.workspaceRoot);
+          this.bridgeRuntimePreferences=saved.preferences;
+          await options.onPreferencesSaved?.(saved.preferences);
+          return saved.filePath;
+        },
         context: {
           modelMaxTokens: 128_000,
           thresholdFraction: 0.6,
@@ -290,9 +293,9 @@ export class AgentBridge {
    */
   private async beginSession(options?: { greet?: boolean }): Promise<void> {
     return runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      const forceBootstrap = process.env["AGENT_PERSONA_BOOTSTRAP_FORCE"] === "1";
+      const forceBootstrap = resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP_FORCE",this.harness.getRuntimePreferences()) === "1";
       const bootstrapPending =
-        process.env["AGENT_PERSONA_BOOTSTRAP"] !== "0" &&
+        resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP",this.harness.getRuntimePreferences()) !== "0" &&
         (forceBootstrap || !this.harness.isPersonaBootstrapCompleted());
       this.awaitingPersonaBootstrapInput = bootstrapPending;
       if (bootstrapPending) {
@@ -383,20 +386,21 @@ export class AgentBridge {
       this.turnEnded = false;
       this.startHeartbeat();
     });
-    on("text", (p) => { this.startHeartbeat(); this.maybeSend("text", p); });
-    on("provider_retry", (p) => { this.startHeartbeat(); this.maybeSend("provider_retry", p); });
-    on("tool_start", (p) => { this.startHeartbeat(); this.maybeSend("tool_start", p); });
+    on("text", (p) => { if(this.turnEnded&&p.channel!=="trace")return; this.startHeartbeat(); this.maybeSend("text", p); });
+    on("provider_retry", (p) => { if(this.turnEnded)return; this.startHeartbeat(); this.maybeSend("provider_retry", p); });
+    on("tool_start", (p) => { if(this.turnEnded)return; this.startHeartbeat(); this.maybeSend("tool_start", p); });
     on("speech", (p) => this.maybeSend("speech", p));
-    on("tool_delta", (p) => this.maybeSend("tool_delta", p));
-    on("tool_result", (p) =>
+    on("tool_delta", (p) => {if(!this.turnEnded)this.maybeSend("tool_delta", p);});
+    on("tool_result", (p) => {
+      if(this.turnEnded)return;
       this.maybeSend("tool_result", {
         callId: p.callId,
         name: p.name,
         args: p.args,
         ok: p.result.ok,
         output: capSseToolOutput(p.result.ok ? p.result.output : p.result.error),
-      })
-    );
+      });
+    });
     on("turn_summary", (p) => this.maybeSend("turn_summary", p));
     on("turn_end", (p) => {
       this.lastTurnSucceeded = p.harnessMetrics?.terminationReason === "ok";
@@ -527,9 +531,20 @@ export class AgentBridge {
     await this.beginSession({ greet: true });
   }
 
+  private acceptedRequestIds = new Set<string>();
+  hasAcceptedRequest(id?:string):boolean{return !!id&&!!this.acceptedRequestIds?.has(id);}
+  private rememberAcceptedRequest(id?:string):void{
+    if(!id)return;
+    if(typeof id!=='string'||id.length>160)throw Error('Invalid message request ID');
+    this.acceptedRequestIds??=new Set();this.acceptedRequestIds.add(id);
+    if(this.acceptedRequestIds.size>256)this.acceptedRequestIds.delete(this.acceptedRequestIds.values().next().value!);
+  }
+
   async sendUserMessage(
     message: string,
     opts?: {
+      requestId?:string;
+      onStart?: () => void;
       freshContext?: boolean;
       liveDictation?: boolean;
       chatAttachments?: import("@liminal/core").ChatFileAttachment[];
@@ -538,32 +553,52 @@ export class AgentBridge {
       workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     }
   ): Promise<void> {
+    if(this.hasAcceptedRequest(opts?.requestId))return;
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is pending. Submit via /api/persona/bootstrap.");
     }
     if(this.isBusy)throw new Error('Agent is busy; finish the current turn first.');
-    void touchChatMetadata(this.chatId).then(()=>{
-      this.sse.send('chat_activity',{chatId:this.chatId},this.chatId);
-    }).catch(() => undefined);
+    if (opts?.requestId && (typeof opts.requestId !== "string" || opts.requestId.length > 160)) {
+      throw Error("Invalid message request ID");
+    }
+    const accept = () => {
+      this.harness.emitter.off("send_start", accept);
+      this.rememberAcceptedRequest(opts?.requestId);
+      opts?.onStart?.();
+      void touchChatMetadata(this.chatId).then(() => {
+        this.sse.send("chat_activity", {chatId:this.chatId}, this.chatId);
+      }).catch(() => undefined);
+    };
     // Pin the workspace for the whole send so file tools, repo_map, world_context,
     // etc. resolve relative to this chat's bound folder rather than the server's cwd.
-    await runWithWorkspaceRoot(this.workspaceRoot, async () => {
-      const run = this.harness.send(message, {
-        freshContext: opts?.freshContext,
-        liveDictation: opts?.liveDictation,
-        chatAttachments: opts?.chatAttachments ?? opts?.imageAttachments,
-        workflowPreset: opts?.workflowPreset,
+    this.harness.emitter.on("send_start", accept);
+    try {
+      await runWithWorkspaceRoot(this.workspaceRoot, async () => {
+        const run = this.harness.send(message, {
+          freshContext: opts?.freshContext,
+          liveDictation: opts?.liveDictation,
+          chatAttachments: opts?.chatAttachments ?? opts?.imageAttachments,
+          workflowPreset: opts?.workflowPreset,
+        });
+        this.startHeartbeat();
+        await run;
       });
-      this.startHeartbeat();
-      await run;
-    });
+    } finally {
+      this.harness.emitter.off("send_start", accept);
+    }
     if (this.lastTurnSucceeded) void autoTitleAfterTurn(this.harness, message).then(meta => {
       if (meta) this.sse.send("chat_title_updated", { chatId: meta.chatId, title: meta.title });
     }).catch(() => undefined);
   }
 
-  async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
-    if(!providerConnectionConfigured(this.harness.config.openRouterApiKey))throw new Error('Connect and verify a model before setting up your personality.');
+  async synchronizePreferences(prefs:RuntimePreferences):Promise<void>{
+    if(this.isBusy || this.bootstrapInFlight)return;
+    await this.harness.patchRuntimePreferences(prefs,{persist:false});
+    this.bridgeRuntimePreferences=prefs;
+    await this.beginSession();
+  }
+
+  async submitPersonaBootstrap(input: string, options?: { skip?: boolean; name?:string }): Promise<void> {
     if (!this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is not pending (already completed or not enabled). Refresh the page.");
     }
@@ -582,8 +617,8 @@ export class AgentBridge {
         const skipAllowed = resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP',this.harness.getRuntimePreferences()) !== "0";
         if (skipAllowed && (options?.skip || /^(skip|\/skip)$/i.test(trimmed))) {
           this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
-          this.awaitingPersonaBootstrapInput = false;
           await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
+          this.awaitingPersonaBootstrapInput = false;
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
@@ -620,7 +655,7 @@ export class AgentBridge {
               message,
               at: Date.now(),
               artifacts: detail?.artifacts,
-            }),this.bootstrapAbort?.signal
+            }),this.bootstrapAbort?.signal,options?.name
         );
         const profile = bundle.profile;
         this.emitBootstrapProgress("applying", "Applying persona context to the runtime...");

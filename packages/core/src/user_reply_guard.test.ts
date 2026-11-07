@@ -27,14 +27,14 @@ test("finalizes research turn with web tools but empty chat", () => {
   );
 });
 
-test("finalizes when vault ran but chat is only a stub", () => {
+test("accepts a brief completed vault reply", () => {
   assert.equal(
     needsUserReplyFinalization({
       assistantText: "Saved to vault.",
       toolsUsed: ["web_search", "vault_write"],
       intent: "research",
     }),
-    true
+    false
   );
 });
 

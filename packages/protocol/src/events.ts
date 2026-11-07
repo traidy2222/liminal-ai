@@ -64,6 +64,8 @@ export interface ChatSummary {
 /** Desktop shell config snapshot (hello / sidecar_ready). */
 export interface WireAppConfig {
   apiKeyConfigured: boolean;
+  providerVerified?: boolean;
+  providerManaged?: boolean;
   personaBootstrapEnabled: boolean;
   personaBootstrapPending: boolean;
   personaBootstrapAllowSkip: boolean;
@@ -139,6 +141,13 @@ export interface TransportEventMap {
   chat_list: { chats: ChatSummary[]; activeChatId: string };
   /** Owner explicitly asks desktop clients to display an activated chat. */
   chat_focus_requested: { chatId: string };
+  /** Accepted prompt from another connected client; the sender keeps its local bubble. */
+  user_message: {
+    text: string;
+    requestId?: string;
+    /** Display metadata only: file bodies and data URLs are not echoed. */
+    attachmentPreviews?: Array<{ name: string }>;
+  };
   /** Prior turns rebuilt from `session.jsonl` after restart or chat activation. */
   transcript_replay: {
     chatId: string;

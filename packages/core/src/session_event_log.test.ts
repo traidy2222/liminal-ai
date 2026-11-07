@@ -218,3 +218,17 @@ test("session logs retain preparation and first answer latency independently of 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test('closed turn does not save late replies or background tool activity for replay',async()=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'liminal-terminal-log-'));const previous=process.env.AGENT_GLOBAL_STORAGE_ROOT;process.env.AGENT_GLOBAL_STORAGE_ROOT=dir;
+ const emitter=new AgentEmitter();const detach=attachSessionEventLog(emitter,'terminal');
+ try{
+  const snapshot:ContextSnapshot={tokenCount:1,maxTokens:100,usageFraction:.01,masked:false};
+  emitter.emit('send_start',{userMessage:'First',agentDepth:0});emitter.emit('text',{channel:'user',delta:'Done.'});emitter.emit('turn_end',{contextSnapshot:snapshot});
+  emitter.emit('text',{channel:'user',delta:'Late repeated answer'});emitter.emit('tool_start',{name:'remember',callId:'late',args:{}});emitter.emit('tool_result',{name:'remember',callId:'late',args:{},result:{ok:true,output:'background'}});
+  emitter.emit('send_start',{userMessage:'Next',agentDepth:0});emitter.emit('text',{channel:'user',delta:'Next answer.'});emitter.emit('turn_end',{contextSnapshot:snapshot});
+  await sleep(100);
+  const raw=await readFile(path.join(dir,'chats','terminal','session.jsonl'),'utf8');assert.doesNotMatch(raw,/Late repeated answer|background|remember/);assert.match(raw,/Next answer/);
+ }finally{detach();if(previous===undefined)delete process.env.AGENT_GLOBAL_STORAGE_ROOT;else process.env.AGENT_GLOBAL_STORAGE_ROOT=previous;await rm(dir,{recursive:true,force:true});}
+});

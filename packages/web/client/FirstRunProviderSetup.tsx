@@ -3,9 +3,10 @@ import {webApiFetch} from './webApiAuth.js';
 import {WEB_SERVER_BASE} from './useSSE.js';
 type Model={id:string;name:string;toolCalling:boolean|null};
 export function FirstRunProviderSetup({onReady}:{onReady:()=>void}){
- const [needed,setNeeded]=useState<boolean|null>(null),[local,setLocal]=useState(false),[base,setBase]=useState('https://openrouter.ai/api/v1'),[key,setKey]=useState(''),[model,setModel]=useState(''),[query,setQuery]=useState(''),[models,setModels]=useState<Model[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const check=()=>{setError('');webApiFetch(WEB_SERVER_BASE+'/api/config').then(async r=>{if(!r.ok)throw Error('Could not load setup.');const cfg=await r.json();setNeeded(cfg.providerConfigured===false);if(cfg.providerConfigured!==false)onReady();}).catch(()=>setError('Cannot connect to Liminal. Retry when the server is ready.'));};
- useEffect(check,[]);
+ const [needed,setNeeded]=useState<boolean|null>(null),[savedBase,setSavedBase]=useState(''),[savedKey,setSavedKey]=useState(false),[local,setLocal]=useState(false),[base,setBase]=useState('https://openrouter.ai/api/v1'),[key,setKey]=useState(''),[model,setModel]=useState(''),[query,setQuery]=useState(''),[models,setModels]=useState<Model[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const check=()=>{setError('');webApiFetch(WEB_SERVER_BASE+'/api/config').then(async r=>{if(!r.ok)throw Error('Could not load setup.');const cfg=await r.json();const requiresSetup=cfg.providerManaged!==true&&(cfg.providerConfigured===false||cfg.personaBootstrapPending&&cfg.providerVerified!==true);setNeeded(requiresSetup);setLocal(cfg.providerSetup?.local===true);setSavedKey(cfg.providerConfigured===true);setSavedBase(cfg.providerSetup?.baseURL||'');if(cfg.providerSetup?.baseURL)setBase(cfg.providerSetup.baseURL);if(cfg.providerSetup?.model)setModel(cfg.providerSetup.model);if(!requiresSetup)onReady();}).catch(()=>setError('Cannot connect to Liminal. Retry when the server is ready.'));};
+ useEffect(()=>{check();const reopen=()=>setNeeded(true);window.addEventListener('liminal-configure-model',reopen);return()=>window.removeEventListener('liminal-configure-model',reopen);},[]);
+ const reuseKey=savedKey&&base.replace(/\/+$/,'')===savedBase.replace(/\/+$/,'');
  if(needed===false)return null;
  const choose=(value:boolean)=>{setLocal(value);setBase(value?'http://127.0.0.1:1234/v1':'https://openrouter.ai/api/v1');setKey('');setModel('');setModels([]);setError('');};
  const request=async(route:string)=>{setBusy(true);setError('');try{const r=await webApiFetch(WEB_SERVER_BASE+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({baseURL:base,apiKey:key,model})});const data=await r.json();if(!r.ok)throw Error(data.error||'Setup failed.');if(route.endsWith('/models')){setModels(data.models);if(local&&data.models.length===1)setModel(data.models[0].id);}else window.location.reload();}catch(e){setError(e instanceof Error?e.message:'Setup failed.');}finally{setBusy(false);}};
@@ -17,12 +18,12 @@ export function FirstRunProviderSetup({onReady}:{onReady:()=>void}){
    <p>{local?'Start LM Studio or Ollama and load a tool-capable model. No cloud key is required.':'Choose a cloud model through OpenRouter. Your key stays on this computer; requests use your provider credits.'}</p>
    {local?<div><button disabled={busy} onClick={()=>{setBase('http://127.0.0.1:1234/v1');setModels([]);setModel('');}}>LM Studio</button> <button disabled={busy} onClick={()=>{setBase('http://127.0.0.1:11434/v1');setModels([]);setModel('');}}>Ollama</button></div>:<a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">Get an OpenRouter key ↗</a>}
    <label>OpenAI-compatible API endpoint<input style={field} disabled={busy} value={base} onChange={e=>{setBase(e.target.value);setModels([]);}}/></label>
-   <label>{local?'Server key (optional)':'API key'}<input type="password" autoComplete="off" style={field} disabled={busy} value={key} onChange={e=>setKey(e.target.value)}/></label>
+   <label>{local?'Server key (optional)':'API key'}<input type="password" autoComplete="off" style={field} disabled={busy} placeholder={reuseKey?'Saved key will be verified':''} value={key} onChange={e=>setKey(e.target.value)}/></label>
    <button disabled={busy} onClick={()=>void request('/api/setup/models')}>Load available models</button>
    {!!models.length&&<><label>Search {models.length} models<input style={field} value={query} onChange={e=>setQuery(e.target.value)}/></label><div style={{maxHeight:180,overflow:'auto'}}>{models.filter(m=>m.toolCalling!==false&&(m.id+' '+m.name).toLowerCase().includes(query.toLowerCase())).map(m=><button key={m.id} disabled={busy} style={{display:'block',width:'100%',textAlign:'left',padding:8}} onClick={()=>setModel(m.id)}>{m.name}<small style={{display:'block'}}>{m.id}</small></button>)}</div></>}
    <label>Selected model ID<input style={field} disabled={busy} value={model} onChange={e=>setModel(e.target.value)}/></label>
    {error&&<p role="alert" style={{color:'#ff9c9c'}}>{error}</p>}
-   <button disabled={busy||!model.trim()||(!local&&!key.trim())} onClick={()=>void request('/api/setup/provider')}>{busy?'Checking connection and tools…':'Verify and continue'}</button><p><small>Verification sends one small tool-call request. Nothing is saved until it passes.</small></p>
+   <button disabled={busy||!model.trim()||(!local&&!reuseKey&&!key.trim())} onClick={()=>void request('/api/setup/provider')}>{busy?'Checking connection and tools…':'Verify and continue'}</button><p><small>Verification sends one small tool-call request. Nothing is saved until it passes.</small></p>
   </>}
  </section></div>;
 }

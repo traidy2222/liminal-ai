@@ -6,17 +6,17 @@ import os from 'node:os';
 import {AgentHarness} from './agent.js';
 import {ArtifactInvestigationLedger} from './artifact_investigation.js';
 
-async function fixture(t: any, repair: boolean, cleanup?: "close" | "ignore") {
+async function fixture(t: any, repair: boolean, cleanup?: "close" | "ignore", finalReview = true) {
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'liminal-artifact-completion-'));
  t.after(async()=>{assert.equal(path.dirname(root),path.resolve(os.tmpdir()));assert(path.basename(root).startsWith('liminal-artifact-completion-'));await fs.rm(root,{recursive:true,force:true});});
- const h=new AgentHarness({openRouterApiKey:'fixture',baseURL:'http://127.0.0.1:1',model:'fixture',workspaceRoot:root,maxToolRoundsPerTurn:10,worldContext:{disabled:true},context:{inceptionMessages:[],modelMaxTokens:1000000,thresholdFraction:0.9}});
+ const h=new AgentHarness({openRouterApiKey:'fixture',baseURL:'http://127.0.0.1:1',model:'fixture',workspaceRoot:root,runtimePreferences:{version:1,updatedAt:0,harness:{env:{AGENT_VERIFY_BEFORE_DONE:finalReview?'1':'0'}}},maxToolRoundsPerTurn:10,worldContext:{disabled:true},context:{inceptionMessages:[],modelMaxTokens:1000000,thresholdFraction:0.9}});
  const state=h as any;state.sendStartTime=Date.now();state.lastUserMessage='Inspect sample.bin and save findings.json and findings.md.';state.prepareMessagesForContextLimit=async(messages:unknown)=>messages;
  state.artifactInvestigation=new ArtifactInvestigationLedger({workspaceRoot:root,taskId:'fixture',goal:state.lastUserMessage});
  h.registry.register({name:'write_fixture',description:'Write known fixture reports',parameters:{type:'object',properties:{}},requiresApproval:false,handler:async()=>{await fs.writeFile(path.join(root,'findings.json'),JSON.stringify({observations:['Measured bytes'],unknowns:['Schema incomplete']}));await fs.writeFile(path.join(root,'findings.md'),'Measured byte observations; schema remains unverified.');return{ok:true,output:'Reports persisted'};}});
  h.registry.register({name:'mcp_rea_close_binary',description:'Close fixture native session',parameters:{type:'object',properties:{}},requiresApproval:false,handler:async()=>({ok:true,output:'{"result":null}'})});
  if(cleanup)state.artifactInvestigation.observeToolResult({name:'mcp_rea_open_binary',args:{},result:{ok:true,output:'{"result":{"kind":"executable"}}'}});
  h.registry.activate(['write_fixture','mcp_rea_close_binary']);
- let stream=0;state.streamWithRetry=async()=> (async function*(){const current=++stream;const useTool=repair&&current===2;const close=cleanup==='close'&&current===4;yield{choices:[{index:0,delta:useTool||close?{tool_calls:[{index:0,id:'write',type:'function',function:{name:close?'mcp_rea_close_binary':'write_fixture',arguments:'{}'}}]}:{content:'Findings are complete.'},finish_reason:useTool||close?'tool_calls':'stop'}]};})();
+ let stream=0;state.streamWithRetry=async()=> (async function*(){const current=++stream;const useTool=repair&&current===2;const close=cleanup==='close'&&current===(finalReview?4:2);yield{choices:[{index:0,delta:useTool||close?{tool_calls:[{index:0,id:'write',type:'function',function:{name:close?'mcp_rea_close_binary':'write_fixture',arguments:'{}'}}]}:{content:'Findings are complete.'},finish_reason:useTool||close?'tool_calls':'stop'}]};})();
  const ends:any[]=[];h.emitter.on('turn_end',event=>ends.push(event));
  await state.runReActLoop();
  const context=h.getContext().getConversationMessages().map(message=>typeof message.content==='string'?message.content:'').join('\n');
@@ -59,4 +59,13 @@ test('one evidence review pass finishes only after an owned native close is ackn
 test('ignored native cleanup is bounded and cannot be reported as successful completion',async(t)=>{
  const result=await fixture(t,true,'ignore');assert.equal(result.stream,5);assert.equal(result.ends[0].harnessMetrics.terminationReason,'error');
  assert.equal((result.context.match(/ARTIFACT FINAL EVIDENCE REVIEW/g)??[]).length,1);assert.equal((result.context.match(/UNFINISHED NATIVE CLEANUP/g)??[]).length,1);assert.match(result.context,/cleanup has not been verified/);
+});
+
+
+test('owned native sessions are closed with optional final review disabled',async(t)=>{
+ const result=await fixture(t,false,'close',false);
+ assert.equal(result.stream,3);
+ assert.equal(result.ends[0].harnessMetrics.terminationReason,'ok');
+ assert.doesNotMatch(result.context,/ARTIFACT FINAL EVIDENCE REVIEW|ARTIFACT FINDINGS NOT PERSISTED/);
+ assert.equal((result.context.match(/UNFINISHED NATIVE CLEANUP/g)??[]).length,1);
 });

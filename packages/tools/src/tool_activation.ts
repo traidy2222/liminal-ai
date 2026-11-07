@@ -95,7 +95,7 @@ export function createToolDiscoveryTools(registry: ToolRegistry) {
         lines.push(`Note: "ppx" means PowerPoint/PPTX. Use document family + doc_render_pptx for deck artifacts.`);
       }
       if (!recommendation&&families.some((f) => f.family === "vision")) {
-        lines.push(`Note: Vision sidecar available via "vision" family. Use vision_analyze when seeing an image would improve accuracy.`);
+        lines.push(`Note: The vision family loads local images into the active model through upload_image. Browser images attach automatically.`);
       }
       if (!recommendation&&families.some((f) => f.family === "markets")) {
         lines.push(`Note: Use "markets_quote" from markets family for prices/costing with as-of + source metadata.`);

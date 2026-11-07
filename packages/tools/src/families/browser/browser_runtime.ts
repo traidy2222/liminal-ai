@@ -6,18 +6,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createServer, type Server } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import {browserPrivateInputMarker,browserPrivateInputSelector,browserScreenshotPrivacyStyle} from "./browser_screenshot_privacy.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { effectiveHarnessEnvRaw, resolveWorkspaceRoot } from "@liminal/core";
+import { effectiveHarnessEnvRaw, resolveWorkspaceRoot,saveAccount,listSavedAccounts,importAccountMemories,type AccountOwner,type AccountStatus,type AccountLoginMethod } from "@liminal/core";
 import type { Page, Browser, BrowserContext, Locator, Frame } from "playwright";
 import { acquireBrowserPage, releaseBrowserPage, shutdownBrowserProfile, browserProfileRoot,
   readBrowserWorkspace, saveBrowserWorkspace, ownsBrowserProfile, lockBrowserProfile, type BrowserTabRecord } from "./browser_profile.js";
-import { prepareBrowserLogin, savedBrowserLogins, readBrowserLoginForFill } from "./browser_credentials.js";
+import { prepareBrowserLogin, savedBrowserLogins, readBrowserLoginForFill,indexBrowserLoginMetadata,browserLoginMetadata,updateBrowserLoginUsername,markBrowserLoginFilled } from "./browser_credentials.js";
 import { BrowserObservations, formatBrowserSnapshot } from "./browser_observation.js";
 import { pageExtractedItems, pageExtractedText, compactExtractedLinks } from "./browser_extraction.js";
 import { browserDeadline } from "./browser_deadline.js";
+import { inspectBrowserVerification } from "./browser_verification.js";
+import { holdBrowserControl } from "./browser_hold.js";
+import { embeddedFrameFeedback } from "./browser_frame_feedback.js";
+import { ensureBrowserElementRefs } from "./browser_element_refs.js";
+import { selectBrowserOption } from "./browser_select_option.js";
+import {dragBrowserPointer} from './browser_drag.js';
+import {browserAssociatedControlLabel, browserContainerClickPosition} from './browser_click_position.js';
+import {scrollBrowserPage} from './browser_scroll.js';
+import {observeBrowserCopyLinks} from './browser_copy_feedback.js';
 import { saveBrowserResearchCheckpoint } from "./browser_research_checkpoint.js";
-import {withBrowserTask,browserTaskIsActive} from './browser_queue.js';
+import {withBrowserTask,browserTaskIsActive,isCurrentBrowserTask} from './browser_queue.js';
 import {
   startBrowserScreencast,
   stopBrowserScreencastForSession,
@@ -27,6 +37,7 @@ import {
 export type WaitUntilNav = "domcontentloaded" | "load" | "networkidle";
 
 export interface SnapshotRef {
+  visual?: boolean;
   role: string;
   name: string;
   exact?: boolean;
@@ -41,13 +52,17 @@ export interface SnapshotRef {
 
 export type BrowserActOp =
   | { op: "wait_ms"; ms: number }
+  | { op: "click_at"; x: number; y: number }
+  | { op: "type_text"; value: string }
+  | {op:'drag_at';from_x:number;from_y:number;to_x:number;to_y:number;duration_ms?:number}
   | { op: "reload"; wait_until?: WaitUntilNav; timeout_ms?: number }
-  | { op: "scroll"; direction: "bottom" | "top" | "down" | "up"; px?: number }
+  | { op: "scroll"; direction: "bottom" | "top" | "down" | "up" | "left" | "right"; px?: number }
   | { op: "wait_selector"; selector: string; state?: "visible" | "attached"; timeout_ms?: number }
   | { op: "click_selector"; selector: string; timeout_ms?: number }
   | { op: "click_role"; role: string; name: string; exact?: boolean; timeout_ms?: number }
   | { op: "click_text"; text: string; exact?: boolean; timeout_ms?: number }
   | { op: "click_ref"; ref: string; timeout_ms?: number }
+  | { op: "press_and_hold_ref"; ref: string; duration_ms: number; timeout_ms?: number }
   | { op: "check_ref" | "uncheck_ref"; ref: string; timeout_ms?: number }
   | { op: "double_click_ref"; ref: string; timeout_ms?: number }
   | { op: "double_click_text"; text: string; exact?: boolean; timeout_ms?: number }
@@ -92,11 +107,13 @@ interface BrowserSession {
   createdAt: number;
   lastUsedAt: number;
   lastScreenshotPath?: string;
+  lastScroll?:Awaited<ReturnType<typeof scrollBrowserPage>>;
   backend?: "webview" | "screencast";
   title?: string;
   paused?: boolean;
   restoreUrl?: string;
   observations?: BrowserObservations;
+  lastActionObservation?: {state:string;actions:string;unchanged:number;visualHash?:string};
 }
 
 const sessions = new Map<string, BrowserSession>();
@@ -154,13 +171,42 @@ export function checkBrowserSessionOwner(sessionId: string, taskId: string): str
 }
 
 export async function browserCredentialAction(args: Record<string, unknown>) {
+  if(args.action==='accounts'){
+    await importAccountMemories();indexBrowserLoginMetadata();
+    return {ok:true as const,output:JSON.stringify({accounts:listSavedAccounts(),passwords:'encrypted_store_only'})};
+  }
   const session = sessions.get(String(args.session_id ?? ""));
   if (!session) return { ok: false as const, error: "Browser session not found" };
   if (session.paused) return { ok: false as const, error: "User takeover is active" };
   try {
-    if (args.action === "prepare") return { ok: true as const, output: JSON.stringify({ login: prepareBrowserLogin(session.page.url(), String(args.username ?? "")), status: "credential_saved_account_not_yet_verified" }) };
-    if (args.action === "list") return { ok: true as const, output: JSON.stringify({ logins: savedBrowserLogins(session.page.url()) }) };
-    if (args.action !== "fill") return { ok: false as const, error: "action must be prepare, fill or list" };
+    if (args.action === "prepare") {
+      const login=prepareBrowserLogin(session.page.url(),String(args.username??''));
+      saveAccount({origin:login.origin,username:login.username,credentialId:login.id,status:'prepared',owner:args.owner as AccountOwner|undefined,sourceChat:session.ownerTaskId});
+      return {ok:true as const,output:JSON.stringify({login,status:'credential_saved_account_not_yet_verified'})};
+    }
+    if (args.action === "list") return { ok: true as const, output: JSON.stringify({ logins: savedBrowserLogins(session.page.url()),site_password_exists:'unknown' }) };
+    if(args.action==='record_account'){
+      const quote=String(args.evidence??'').trim(),status=args.status??'active';
+      const evidenceHint=async(code:string)=>{
+       const phrases=await session.page.locator('body').innerText({timeout:2000}).then(text=>text.split('\n').map(s=>s.replace(/\s+/g,' ').trim()).filter(s=>s.length>=5&&s.length<=100).slice(0,6)).catch(()=>[] as string[]);
+       return {ok:false as const,error:code+': '+JSON.stringify({required:'Use status active/blocked/closed and an exact 5–500 character quote from the current page.',visible_phrases:phrases,account_recorded:false})};
+      };
+      if(!['active','blocked','closed'].includes(String(status))||quote.length<5||quote.length>500)return evidenceHint('ACCOUNT_EVIDENCE_REQUIRED');
+      const matched=await session.page.evaluate(quote=>document.body.innerText.replace(/\s+/g,' ').trim().toLowerCase().includes(quote.replace(/\s+/g,' ').trim().toLowerCase()),quote);
+      if(!matched)return evidenceHint('ACCOUNT_EVIDENCE_MISMATCH');
+      // Signup and the signed-in app may use different origins. Link metadata
+      // across that redirect; the actual password fill still enforces exact origin.
+      const passwordless=['email_code','magic_link','oauth'].includes(String(args.login_method));
+      if(passwordless&&args.credential_id)return {ok:false as const,error:'Passwordless accounts must not link a generated password. Record username, login_method and page evidence without credential_id.'};
+      const login=args.credential_id?browserLoginMetadata().find(l=>l.id===args.credential_id):undefined;
+      if(args.credential_id&&!login)return {ok:false as const,error:'The credential reference does not exist in the local store.'};
+      if(login&&status==='active'&&typeof args.username==='string'&&args.username.trim())updateBrowserLoginUsername(login.id,args.username.trim());
+      const beforeIds=new Set(listSavedAccounts().map(a=>a.id));
+      const account=saveAccount({origin:login?.origin??session.page.url(),username:String(args.username||login?.username||''),email:typeof args.email==='string'?args.email:undefined,
+        owner:args.owner as AccountOwner|undefined,status:status as AccountStatus,loginMethod:(args.login_method??'unknown') as AccountLoginMethod,credentialId:login?.id,profileUrl:session.page.url(),sourceChat:session.ownerTaskId});
+      return {ok:true as const,output:JSON.stringify({account,operation:'upsert',replaced_existing_record:beforeIds.has(account.id),current_records_for_this_login:listSavedAccounts().filter(a=>new URL(a.origin).hostname.replace(/^www\./,'')===new URL(account.origin).hostname.replace(/^www\./,'')&&a.username.toLowerCase()===account.username.toLowerCase()).length,evidence:'matched_current_page',available_in_new_chats:true})};
+    }
+    if (args.action !== "fill") return { ok: false as const, error: "action must be prepare, fill, list, accounts or record_account" };
     const fields: Record<string, Locator> = {};
     for(const key of ["username_ref","password_ref","confirm_password_ref"]){
       const ref=args[key];if(ref==null&&key!=="password_ref")continue;
@@ -174,8 +220,11 @@ export async function browserCredentialAction(args: Record<string, unknown>) {
     }
     const login=readBrowserLoginForFill(session.page.url(),String(args.credential_id??''));
     if(fields.username_ref)await fields.username_ref.fill(login.username,{timeout:5000});
-    await fields.password_ref!.fill(login.password,{timeout:5000});
-    if(fields.confirm_password_ref)await fields.confirm_password_ref.fill(login.password,{timeout:5000});
+    for(const field of [fields.password_ref!,fields.confirm_password_ref].filter((field): field is Locator=>!!field)){
+      await field.evaluate((element,marker)=>element.setAttribute(marker,''),browserPrivateInputMarker,{timeout:5000});
+      await field.fill(login.password,{timeout:5000});
+    }
+    markBrowserLoginFilled(String(args.credential_id));
     return { ok: true as const, output: "SAVED_LOGIN_FILLED: password remains in the encrypted local store. Submit and verify the account page separately." };
   } catch {
     // Locator failures may include the input value; keep generated passwords out of traces.
@@ -187,6 +236,7 @@ function attachSessionLifecycle(session: BrowserSession): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   session.page.on("framenavigated", frame => {
     if (frame !== session.page.mainFrame()) return;
+    clearBrowserPanelFrame(session.sessionId);
     if (!session.page.url().startsWith("chrome-error:") && session.page.url() !== "about:blank") session.restoreUrl = undefined;
     session.currentUrl = session.restoreUrl ?? session.page.url(); session.refs.clear();
     if (timer) clearTimeout(timer);
@@ -254,7 +304,16 @@ export function syncBrowserSessionUrl(sessionId: string): void {
 }
 
 export function applyScreencastFrame(sessionId: string, buf: Buffer): void {
-  if (buf.length > 64) panelFrames.set(sessionId, buf);
+  if (buf.length > 64) {
+    panelFrames.set(sessionId, buf);
+    const progress=sessions.get(sessionId)?.lastActionObservation;
+    if(progress){const hash=createHash('sha256').update(buf).digest('hex');if(progress.visualHash&&progress.visualHash!==hash)progress.unchanged=0;progress.visualHash=hash;}
+  }
+}
+export function clearBrowserPanelFrame(sessionId:string):void{
+ panelFrames.delete(sessionId);const cached=panelFramePaths.get(sessionId);
+ if(cached)try{fs.unlinkSync(cached);}catch{/* The cache may already be gone. */}
+ panelFramePaths.delete(sessionId);
 }
 
 export async function refreshBrowserEmbedView(sessionId: string): Promise<void> {
@@ -657,8 +716,12 @@ function sessionTtlMs(): number {
 
 function browserTaskBusy(taskId:string){return browserTaskIsActive(taskId)||busyBrowserTasks.get(taskId)?.()===true;}
 function startBrowserIdleCleanup(){if(!idleTimer){idleTimer=setInterval(()=>{void hibernateIdleBrowserTabs().catch(()=>{});},30000);idleTimer.unref();}}
-async function safeToHibernate(session:BrowserSession):Promise<boolean>{
- if(session.paused||visibleTabs.has(session.sessionId)||browserScreencastHasSubscribers(session.sessionId)||browserTaskBusy(session.ownerTaskId))return false;
+function tabPinned(session:BrowserSession,requester?:string):boolean{
+ const ownBackground=requester===session.ownerTaskId&&isCurrentBrowserTask(requester)&&selectedTaskTabs.get(requester)!==session.sessionId;
+ return session.paused===true||visibleTabs.has(session.sessionId)||browserScreencastHasSubscribers(session.sessionId)||(browserTaskBusy(session.ownerTaskId)&&!ownBackground);
+}
+async function safeToHibernate(session:BrowserSession,requester?:string):Promise<boolean>{
+ if(tabPinned(session,requester))return false;
  let timer:ReturnType<typeof setTimeout>|undefined;
  try{return await Promise.race([session.page.evaluate(()=>{
   if(window.onbeforeunload||[...document.querySelectorAll('audio,video')].some(el=>!(el as HTMLMediaElement).paused&&!(el as HTMLMediaElement).ended))return false;
@@ -671,11 +734,11 @@ async function safeToHibernate(session:BrowserSession):Promise<boolean>{
  }).catch(()=>false),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),1500);timer.unref();})]);}
  finally{if(timer)clearTimeout(timer);}
 }
-async function hibernateBrowserTab(id:string):Promise<boolean>{
+async function hibernateBrowserTab(id:string,requester?:string):Promise<boolean>{
  if(hibernatingTabs.has(id))return false;
  const work=(async()=>{
   const session=sessions.get(id),lastUsedAt=session?.lastUsedAt;
-  if(!session||!await safeToHibernate(session)||sessions.get(id)!==session||lastUsedAt!==session.lastUsedAt||browserTaskBusy(session.ownerTaskId)||visibleTabs.has(id)||browserScreencastHasSubscribers(id))return false;
+  if(!session||!await safeToHibernate(session,requester)||sessions.get(id)!==session||lastUsedAt!==session.lastUsedAt||tabPinned(session,requester))return false;
   dormantTabs.set(id,{sessionId:id,ownerTaskId:session.ownerTaskId,url:session.currentUrl,title:session.title||'Browser',paused:session.paused===true,lastUsedAt:session.lastUsedAt});
   sessions.delete(id);publishBrowserViewClosed(id);persistBrowserTabs();
   if(session.backend)await releaseBrowserPage(id,session.page,session.backend).catch(()=>{});else await session.browser.close().catch(()=>{});
@@ -690,7 +753,7 @@ async function reserveBrowserSlot(owner:string):Promise<string|undefined>{
  const reserve=capacityQueue.then(async()=>{
   const limit=Math.max(1,Math.min(12,parseInt(effectiveHarnessEnvRaw('AGENT_BROWSER_MAX_LIVE_TABS')??'4',10)||4)),opening=()=>[...openingTabs.values()].reduce((a,b)=>a+b,0);
   for(const session of [...sessions.values()].sort((a,b)=>a.lastUsedAt-b.lastUsedAt)){
-   if(sessions.size+opening()<limit)break;await hibernateBrowserTab(session.sessionId);
+   if(sessions.size+opening()<limit)break;await hibernateBrowserTab(session.sessionId,owner);
   }
   if(sessions.size+opening()>=limit)return 'All live browser slots are active or contain unsaved work. Close a tab or finish the other browser task, then retry.';
   openingTabs.set(owner,(openingTabs.get(owner)??0)+1);return undefined;
@@ -972,16 +1035,22 @@ async function buildStealthContext(
   return context;
 }
 
-type DomSnapshotItem = { role: string; name: string; selector: string; state: string; href?: string };
+type DomSnapshotItem = { role: string; name: string; selector: string; state: string; href?: string;visual?:boolean };
 let snapshotRefCounter = 0;
 const domRefNamespace = "__liminal_refs_" + randomUUID().replaceAll("-", "");
 const frameNodeRefs = new WeakMap<Frame, Map<string,string>>();
 
 async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promise<{items:DomSnapshotItem[];readable:string;context:string;contextSelector:string}> {
-  return target.evaluate(({limit,token,namespace})=>{
+  const engine=await ensureBrowserElementRefs();
+  return target.evaluate(({limit,token,namespace,engine,privateInputSelector})=>{
     const state=window as unknown as Record<string,WeakMap<Element,string>>;
     if(!state[namespace])Object.defineProperty(state,namespace,{value:new WeakMap<Element,string>()});
     const identities=state[namespace]!;
+    const targetNamespace=namespace+'_targets';
+    const targetState=window as unknown as Record<string,Map<string,WeakRef<Element>>>;
+    if(!targetState[targetNamespace])Object.defineProperty(targetState,targetNamespace,{value:new Map<string,WeakRef<Element>>()});
+    const targets=targetState[targetNamespace]!;
+    for(const [id,ref] of targets)if(!ref.deref()?.isConnected||id.startsWith('context-'))targets.delete(id);
     const visible=(el:Element):boolean=>{
       if(!el.getClientRects().length) return false;
       let current:Element|null=el;
@@ -996,10 +1065,12 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       return true;
     };
     function renderedText(root:Element):string {
-      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),pieces:string[]=[],seen=new WeakMap<Element,boolean>();
+      const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT),pieces:string[]=[],seen=new WeakMap<Element,boolean>();
       let previous:Element|null=null,lastStrike:Element|null=null;
       for(let node=walker.nextNode();node;node=walker.nextNode()){
-        const parent=node.parentElement,text=node.textContent?.replace(/\s+/g,' ').trim();
+        const isBreak=node.nodeType===Node.ELEMENT_NODE&&node.nodeName==='BR';
+        if(!isBreak&&node.nodeType!==Node.TEXT_NODE)continue;
+        const parent=node.parentElement,text=isBreak?'\n':node.textContent?.replace(/\s+/g,' ');
         if(!parent||!text||parent.closest('select,option,script,style,noscript'))continue;
         let shown=seen.get(parent);
         if(shown===undefined){
@@ -1008,18 +1079,20 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
           seen.set(parent,shown);
         }
         if(!shown)continue;
+        if(isBreak){if(getComputedStyle(node as Element).display!=='none')pieces.push('\n');continue;}
         const block=parent.closest('p,div,li,tr,td,th,h1,h2,h3,h4,h5,h6,article,section,main,body');
+        if(!text.trim()){if(previous===block&&pieces.length)pieces.push(' ');continue;}
         let strike=parent.closest('del,s,strike');
         if(!strike)for(let el:Element|null=parent;el;el=el.parentElement){if(getComputedStyle(el).textDecorationLine.includes('line-through')){strike=el;break;}}
-        pieces.push((pieces.length?(block===previous?' ':'\n'):'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
+        pieces.push((pieces.length&&block!==previous?'\n':'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
         previous=block;lastStrike=strike;
       }
-      return pieces.join('');
+      return pieces.join('').replace(/ +\n/g,'\n').replace(/\n +/g,'\n').trim();
     }
     const modal=[...document.querySelectorAll('dialog[open],[role="dialog"][aria-modal="true"],[role="alertdialog"][aria-modal="true"]')].filter(visible).at(-1);
     const root=modal??document.body;
-    root.setAttribute("data-liminal-context",token);
-    const selector='a[href],button,input,textarea,select,[role="button"],[role="link"],[role="textbox"],[role="searchbox"],[role="combobox"],[role="option"],[role="listbox"],[role="checkbox"],[role="radio"],[role="tab"],[role="switch"],[contenteditable="true"],label,[ondblclick]';
+    targets.set('context-'+token,new WeakRef(root));
+    const selector='a[href],button,input,textarea,select,canvas,section[aria-label],[role="region"][aria-label],[role="group"][aria-label],h1,h2,h3,[role="heading"],[role="button"],[role="link"],[role="textbox"],[role="searchbox"],[role="combobox"],[role="option"],[role="listbox"],[role="checkbox"],[role="radio"],[role="tab"],[role="switch"],[contenteditable]:not([contenteditable="false"]),label,[ondblclick],[role="menuitem"],[tabindex],li,a:not([href]),[onclick]';
     const nodes:Element[]=[];
     const collect=(scope:Element|ShadowRoot)=>{
       nodes.push(...scope.querySelectorAll(selector));
@@ -1041,12 +1114,65 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
     const listing=resultCards.length>=2&&resultChars>=contentRoot.innerText.trim().length*.35;
     const resultLinks=new Set(listing?resultCards.flatMap(card=>[...card.querySelectorAll('h2 a[href],h3 a[href],a[href]:has(h2),a[href]:has(h3),[role="heading"] a[href]')]):[]);
     // Form/main controls must not disappear behind dozens of navigation links.
-    const priority=(el:Element)=>listing?(resultLinks.has(el)?0:el.closest('nav,header,footer,aside,[role="navigation"]')?3:el.matches('input[type="checkbox"],input[type="radio"]')?2:1):el.closest('form,main,[role="main"],[role="dialog"],dialog')||el.matches('input,textarea,select,[contenteditable="true"]')?0:el.closest('nav,header,footer,[role="navigation"]')?2:1;
-    nodes.sort((a,b)=>priority(a)-priority(b));
+    const priority=(el:Element)=>listing?(resultLinks.has(el)?0:el.closest('nav,header,footer,aside,[role="navigation"]')?3:el.matches('input[type="checkbox"],input[type="radio"]')?2:1):el.closest('form,main,[role="main"],[role="dialog"],dialog')||el.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')?0:el.closest('nav,header,footer,[role="navigation"]')?2:1;
+    const covered=new WeakMap<Element,boolean>();
+    const isCovered=(el:Element)=>{
+      if(covered.has(el))return covered.get(el)!;
+      const r=el.getBoundingClientRect(),left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
+      const blocked=right>left&&bottom>top&&[.2,.5,.8].every(f=>{
+        const hit=document.elementFromPoint(left+(right-left)*f,top+(bottom-top)*.5);
+        return hit!==null&&hit!==el&&!el.contains(hit);
+      });
+      covered.set(el,blocked);return blocked;
+    };
+    const baseActionPriority=(el:Element)=>{
+      if(listing)return priority(el);
+      if(el.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))return -2;
+      if(el.matches(':focus'))return -1;
+      if(el.matches('section[aria-label],[role="region"][aria-label],[role="group"][aria-label]'))return -1;
+      if(el.matches('[role="button"]')&&el.querySelector('button,input,textarea,[role="button"],a[href]'))return 3;
+      const region=el.closest('section[aria-label],[role="group"][aria-label],[role="region"][aria-label]');
+      if(region&&el.matches('button,[role="button"]')){
+        const row=el.closest('li,tr,[role="row"],[role="listitem"]');
+        const entry=row&&!row.querySelector('section[aria-label],[role="group"][aria-label],[role="region"][aria-label]')&&(row.querySelectorAll('button,input,[role="button"],a[href]').length>1||row.textContent?.trim()!==el.textContent?.trim());
+        if(!entry)return -1;
+      }
+      if(el.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"]),button,[role="button"]'))return priority(el);
+      if(el.matches('a[href]')&&el.closest('li,[role="row"],[role="listitem"]')?.querySelector('button,[role="button"],input'))return 2;
+      return priority(el)+1;
+    };
+    // Visually covered background controls must not crowd the active editor out
+    // of a bounded snapshot, including overlays without semantic dialog roles.
+    const actionPriority=(el:Element)=>baseActionPriority(el)+(isCovered(el)?20:0);
+    nodes.sort((a,b)=>actionPriority(a)-actionPriority(b));
+    if(!listing){
+      // Give each named pane a share of the bounded observation. A long first
+      // section must not hide the actions in later sections of the same app.
+      const ordered:Element[]=[];
+      for(const rank of [...new Set(nodes.map(actionPriority))].sort((a,b)=>a-b)){
+        const groups=new Map<Element,Element[]>();
+        for(const el of nodes.filter(el=>actionPriority(el)===rank)){
+          const region=el.closest('section[aria-label],[role="group"][aria-label],[role="region"][aria-label]')??root;
+          const group=groups.get(region)??[];group.push(el);groups.set(region,group);
+        }
+        const lists=[...groups.values()];for(let i=0;i<Math.max(0,...lists.map(g=>g.length));i++)for(const group of lists)if(group[i])ordered.push(group[i]!);
+      }
+      nodes.splice(0,nodes.length,...ordered);
+    }
+    const editableSelector='[contenteditable]:not([contenteditable="false"])';
+    const rowCache=new WeakMap<Element,boolean>(),headCache=new WeakMap<Element,Element|null>();
+    const repeatedEditorRow=(el:Element)=>{
+      if(rowCache.has(el))return rowCache.get(el)!;
+      const signature=(node:Element)=>node.tagName+' '+(node.getAttribute('role')||node.classList[0]||'');
+      const result=!!el.parentElement&&!!el.querySelector(editableSelector)&&[...el.parentElement.children].some(other=>other!==el&&signature(other)===signature(el)&&other.querySelector(editableSelector));
+      rowCache.set(el,result);return result;
+    };
+    const editorHead=(el:Element)=>{if(!headCache.has(el))headCache.set(el,[...el.querySelectorAll(editableSelector)].find(visible)??null);return headCache.get(el);};
     const items:DomSnapshotItem[]=[];
     for(const el of nodes){
       if(!visible(el))continue;
-      if(el instanceof HTMLLabelElement && (el.control || el.querySelector('input,textarea,select,[contenteditable="true"]')))continue;
+      if(el.matches('li,a:not([href]),[tabindex]')&&!el.matches('a[href],button,input,textarea,select,[role],[onclick]')&&getComputedStyle(el).cursor!=='pointer')continue;
+      if(el instanceof HTMLLabelElement && (el.control || el.querySelector('input,textarea,select,[contenteditable]:not([contenteditable="false"])')))continue;
       const tag=el.tagName.toLowerCase();
       const input=el instanceof HTMLInputElement?el:null;
       if(input?.type==='hidden')continue;
@@ -1054,18 +1180,48 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       const labelled=el.getAttribute('aria-labelledby')?.split(/\s+/).map(id=>(el.getRootNode() as Document|ShadowRoot).getElementById(id)?.textContent?.trim()||'').join(' ').trim();
       const labels=control?[...(control.labels??[])].map(label=>{const copy=label.cloneNode(true) as HTMLElement;copy.querySelectorAll('input,select,textarea,[contenteditable]').forEach(child=>child.remove());return copy.textContent?.trim()||'';}).join(' '):'';
       const name=(el.getAttribute('aria-label')?.trim()||labelled||labels||el.getAttribute('placeholder')||el.getAttribute('title')||((el as HTMLElement).isContentEditable||el instanceof HTMLSelectElement?'':(el as HTMLElement).innerText?.trim())||el.getAttribute('name')||el.id||'Unlabelled control').replace(/\s+/g,' ').slice(0,160);
-      const role=el.getAttribute('role')|| (tag==='select'?'combobox':tag==='textarea'||(el as HTMLElement).isContentEditable?'textbox':input?['checkbox','radio'].includes(input.type)?input.type:input.type==='search'?'searchbox':['submit','button','reset'].includes(input.type)?'button':'textbox':tag==='a'?'link':tag==='label'?'text':'button');
+      const role=el.getAttribute('role')|| (tag==='section'?'region':/^h[1-6]$/.test(tag)?'heading':tag==='canvas'?'img':tag==='select'?'combobox':tag==='textarea'||(el as HTMLElement).isContentEditable?'textbox':input?['checkbox','radio'].includes(input.type)?input.type:input.type==='search'?'searchbox':['submit','button','reset'].includes(input.type)?'button':'textbox':tag==='a'?'link':tag==='label'?'text':'button');
       const state:string[]=[];
+      if(isCovered(el))state.push('covered=true');
+      if(name==='Unlabelled control'&&el.matches('button,[role="button"]')){
+        const icon=el.querySelector('i[class],svg[class],[data-icon]');
+        const hint=icon?.getAttribute('data-icon')||icon?.getAttribute('class');
+        if(hint)state.push('icon_hint='+JSON.stringify(hint.slice(0,140)));
+      }
+      if(['region','group'].includes(role))state.push('container=true');
+      const region=el.closest('section[aria-label],[role="group"][aria-label],[role="region"][aria-label]');
+      if(region)state.push('section='+JSON.stringify(region.getAttribute('aria-label')?.slice(0,100)));
       if(el.matches(':focus'))state.push('focused=true');
-      const row=el.closest('li,tr,[role="row"],[role="listitem"]');
-      if(row&&row!==el){const context=renderedText(row).replace(/\s+/g,' ').trim().slice(0,220);if(context)state.push('row='+JSON.stringify(context));}
+      let row=el.closest('li,tr,[role="row"],[role="listitem"]');
+      // Card UIs frequently use plain divs, leaving repeated "Open details"
+      // buttons indistinguishable. Carry the nearest small visible card text.
+      if(!row&&role==='button'&&name.length<70){
+        let parent=el.parentElement;
+        for(let depth=0;parent&&depth<3;depth++,parent=parent.parentElement){
+          if(parent.matches('main,nav,aside,header,footer,section,dialog,[role="dialog"],[role="region"],[role="group"]'))break;
+          const text=renderedText(parent).replace(/\s+/g,' ').trim();
+          if(text.length>4&&text.length<=240&&text!==name&&parent.querySelectorAll('button,input,a[href],[role="button"]').length<=6){row=parent;break;}
+        }
+      }
+      if(row&&row!==el&&name.length<70&&!row.querySelector('section[aria-label],[role="group"][aria-label],[role="region"][aria-label]')){const context=renderedText(row).replace(/\s+/g,' ').trim().slice(0,120);if(context&&context!==name)state.push('row='+JSON.stringify(context));}
       if(el.matches(':disabled')||el.getAttribute('aria-disabled')==='true')state.push('disabled');
       if(control?.required||el.getAttribute('aria-required')==='true')state.push('required');
       if((el as HTMLElement).isContentEditable||input&&role==='combobox'&&!input.readOnly)state.push('editable');
+      if((el as HTMLElement).isContentEditable){
+        const path:string[]=[];let depth=0;
+        for(let parent=el.parentElement;parent&&parent!==root;parent=parent.parentElement){
+          if(!repeatedEditorRow(parent))continue;depth++;const head=editorHead(parent);
+          if(head&&head!==el){const text=(head as HTMLElement).innerText?.replace(/\s+/g,' ').trim();if(text)path.unshift(text.slice(0,90));}
+          if(depth>=12)break;
+        }
+        state.push('editor_depth='+depth);if(path.length)state.push('editor_path='+JSON.stringify(path.slice(-4).join(' > ')));
+      }
+
       if((input?.readOnly)||(el instanceof HTMLTextAreaElement&&el.readOnly))state.push('readonly');
-      if(input?.type==='password')state.push(input.value?'password=filled':'password=empty');
-      else if(control&&!(el instanceof HTMLSelectElement)&&control.value)state.push('value='+JSON.stringify(control.value.slice(0,180)));
-      else if((el as HTMLElement).isContentEditable&&(el as HTMLElement).innerText)state.push('value='+JSON.stringify((el as HTMLElement).innerText.slice(0,180)));
+      if(input?.matches(privateInputSelector))state.push(input.value?'password=filled':'password=empty');
+      else if(control&&!(el instanceof HTMLSelectElement))state.push('value='+JSON.stringify(control.value.slice(0,180)));
+      else if((el as HTMLElement).isContentEditable){const text=(el as HTMLElement).innerText.replace(/[\u200b\ufeff]/g,'');state.push('value='+JSON.stringify(text.trim()?text.slice(0,180):''));}
+      const placeholder=el.getAttribute('placeholder')||el.getAttribute('aria-placeholder')||el.getAttribute('data-placeholder');if(placeholder)state.push('placeholder='+JSON.stringify(placeholder.slice(0,180)));
       if(input&&['checkbox','radio'].includes(input.type))state.push('checked='+input.checked);
       for(const key of ['expanded','selected','checked','invalid']){const value=el.getAttribute('aria-'+key);if(value!==null)state.push(key+'='+value);}
       if(el instanceof HTMLSelectElement){state.push('selected='+JSON.stringify([...el.selectedOptions].map(o=>o.label).join(', ')));state.push('options='+JSON.stringify([...el.options].slice(0,16).map(o=>o.label)));}
@@ -1073,8 +1229,9 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
       if(control&&!control.validity.valid&&control.validationMessage)state.push('validation='+JSON.stringify(control.validationMessage.slice(0,180)));
       const described=el.getAttribute('aria-describedby')?.split(/\s+/).map(id=>(el.getRootNode() as Document|ShadowRoot).getElementById(id)?.textContent?.trim()||'').filter(Boolean).join(' ');
       if(described)state.push('description='+JSON.stringify(described.slice(0,240)));
-      const marker=identities.get(el)??token+'-'+(items.length+1);identities.set(el,marker);el.setAttribute('data-liminal-ref',marker);
-      items.push({role,name,selector:'[data-liminal-ref="'+marker+'"]',state:state.join(' '),...(el instanceof HTMLAnchorElement&&/^https?:/.test(el.href)?{href:el.href}:{})});
+      const marker=identities.get(el)??token+'-'+(items.length+1);identities.set(el,marker);targets.set(marker,new WeakRef(el));
+      if(tag==='canvas')state.push('visual_canvas='+JSON.stringify({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height}));
+      items.push({role,name:tag==='canvas'&&name==='Unlabelled control'?'Canvas':name,selector:engine+'='+targetNamespace+':'+marker,state:state.join(' '),...(tag==='canvas'?{visual:true}:{}),...(el instanceof HTMLAnchorElement&&/^https?:/.test(el.href)?{href:el.href}:{})});
       if(items.length>=limit)break;
     }
     const feedback=[...root.querySelectorAll('[role="alert"],[role="status"],[aria-live]')].filter(visible).map(el=>(el as HTMLElement).innerText?.trim()).filter(Boolean).join(' | ').slice(0,1000);
@@ -1090,11 +1247,12 @@ async function buildDomSnapshotRefs(target: Page | Frame, maxItems = 48): Promis
     const timestamps=[...root.querySelectorAll('time[datetime],relative-time[datetime],local-time[datetime]')].filter(visible).slice(0,24).map(el=>({text:(el as HTMLElement).innerText?.trim(),datetime:el.getAttribute('datetime'),context:el.parentElement?.innerText?.replace(/\s+/g,' ').slice(0,180)}));
     const searchPage=/(^|\.)(google\.[a-z.]+|bing\.com|duckduckgo\.com)$/.test(location.hostname)&&(new URL(location.href).searchParams.has('q')||location.pathname.includes('/search'));
     const reading={page_kind:searchPage?'search_results':listing||articles.length>1?'listing':articles.length===1?'article':'page',...(listing?{result_count:resultCards.length,excerpted_results:Math.min(resultCards.length,6)}:{}),rendered_chars:readable.length,excerpt_chars:Math.min(readable.length,5000),truncated:readable.length>5000||listing&&(resultCards.length>6||resultCards.some(card=>(card as HTMLElement).innerText.replace(/\s+/g,' ').trim().length>900))};
-    return {items,readable:readable.slice(0,5000)+(readable.length>5000?'\n…(readable excerpt truncated; use browser_extract for the needed section)':''),contextSelector:'[data-liminal-context="'+token+'"]',context:JSON.stringify({focus:modal?'dialog':'page',reading,text:content.innerText?.replace(/\s+/g,' ').trim().slice(0,300),...(feedback?{feedback}:{}),...(timestamps.length?{timestamps}:{}),...(canvas||unlabeledImages?{visual_content:{canvas,unlabeledImages,note:'Use a screenshot for visual content that has no DOM text.'}}:{})})};
-  },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace});
+    return {items,readable:readable.slice(0,5000)+(readable.length>5000?'\n…(readable excerpt truncated; use browser_extract for the needed section)':''),contextSelector:engine+'='+targetNamespace+':context-'+token,context:JSON.stringify({focus:modal?'dialog':'page',viewport_css:{width:innerWidth,height:innerHeight},reading,text:content.innerText?.replace(/\s+/g,' ').trim().slice(0,300),...(feedback?{feedback}:{}),...(timestamps.length?{timestamps}:{}),...(canvas||unlabeledImages?{visual_content:{canvas,unlabeledImages,note:'Use a screenshot for visual content that has no DOM text.'}}:{})})};
+  },{limit:maxItems,token:randomUUID(),namespace:domRefNamespace,engine,privateInputSelector:browserPrivateInputSelector});
 }
 
 export async function buildPageSnapshot(page:Page,maxChars=8_000,timeoutMs=5000):Promise<{snapshotText:string;refs:Map<string,SnapshotRef>}> {
+  await ensureBrowserElementRefs();
   assertPageWithinFileRoots(page);
   return browserDeadline(() => collectPageSnapshot(page,maxChars), timeoutMs, 'Page observation').catch(error => ({
     snapshotText: `URL: ${page.url()}\nOBSERVATION_WARNING: ${error.message} No fresh text or controls were observed.`,
@@ -1107,6 +1265,8 @@ async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotT
   const refs=new Map<string,SnapshotRef>(), lines:string[]=[],contexts:string[]=[],readable:string[]=[],trees:string[]=[],passwords:string[]=[];
   const nextRef=()=> 'e'+(++snapshotRefCounter);
   let destinationBudget=1400;
+  let hasPasswordInput=false;
+  let embeddedFeedbackBudget=1600;
   const mainModal=await page.locator('dialog[open],[aria-modal="true"]').evaluateAll(elements=>elements.some(el=>el.getClientRects().length>0));
   const frames=page.frames().slice(0,12);
   for(const frame of frames){
@@ -1116,8 +1276,19 @@ async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotT
       if(mainModal&&!await host.evaluate(el=>el instanceof Element && !!el.closest('dialog[open],[aria-modal="true"]')).catch(()=>false))continue;
     }
     try{
-      const dom=await buildDomSnapshotRefs(frame,48);
-      const frameLabel=frame===page.mainFrame()?'main':`frame ${new URL(frame.url()).origin}`;
+      const dom=await buildDomSnapshotRefs(frame,80);
+      let frameLabel='main';
+      if(frame!==page.mainFrame()){
+        try{frameLabel=`frame ${new URL(frame.url()).origin}`;}catch{frameLabel='embedded frame';}
+        if(embeddedFeedbackBudget>0){
+          const feedback=await browserDeadline(()=>embeddedFrameFeedback(page,frame,dom.readable+'\n'+dom.items.map(item=>item.name).join('\n'),Math.min(800,embeddedFeedbackBudget)),1200,'Embedded feedback').catch(()=>'');
+          if(feedback){
+            embeddedFeedbackBudget-=feedback.length;
+            contexts.push(`${frameLabel} accessibility_feedback: ${JSON.stringify(feedback)}`);
+            readable.push(`${frameLabel} accessibility feedback:\n${feedback}`);
+          }
+        }
+      }
       contexts.push(`${frameLabel}: ${dom.context}`);
       if(dom.readable)readable.push(`${frameLabel}:\n${dom.readable}`);
       for(const item of dom.items){
@@ -1125,7 +1296,7 @@ async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotT
         if(!known){known=new Map();frameNodeRefs.set(frame,known);}
         const id=known.get(item.selector)??nextRef();known.set(item.selector,id);
         if(known.size>10000){known.clear();known.set(item.selector,id);}
-        refs.set(id,{role:item.role,name:item.name,exact:true,selector:item.selector,frame,href:item.href,observedUrl:frame.url()});
+        refs.set(id,{role:item.role,name:item.name,exact:true,selector:item.selector,frame,href:item.href,observedUrl:frame.url(),visual:item.visual});
         const destination=item.href&&item.href.length<=Math.min(300,destinationBudget)?' href='+JSON.stringify(item.href):'';
         destinationBudget-=destination.length;
         lines.push(`  ${id} ${item.role} ${JSON.stringify(item.name)}${item.state?' '+item.state:''}${destination}${frame===page.mainFrame()?'':' [embedded frame]'}`);
@@ -1135,11 +1306,18 @@ async function collectPageSnapshot(page:Page,maxChars:number):Promise<{snapshotT
       const root=await main.count()?main:activeRoot;
       const yaml=dom.readable?'':await root.ariaSnapshot().catch(()=>'');
       if(yaml)trees.push(`${frameLabel}:\n${yaml.slice(0,4500)}`);
-      passwords.push(...await frame.locator('input[type="password"]').evaluateAll(elements=>elements.map(el=>(el as HTMLInputElement).value).filter(Boolean)));
+      const passwordValues=await frame.locator(browserPrivateInputSelector).evaluateAll(elements=>elements.map(el=>(el as HTMLInputElement).value));
+      hasPasswordInput ||= passwordValues.length>0;passwords.push(...passwordValues.filter(Boolean));
     }catch(err){contexts.push(`frame observation unavailable: ${err instanceof Error?err.name:'error'}`);}
   }
   const observedAt=await page.evaluate(()=>({iso:new Date().toISOString(),local:new Date().toString(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}));
-  let text=formatBrowserSnapshot({observedAt,contexts,controls:lines,readable:readable.join('\n'),tree:trees.join('\n')},maxChars);
+  const passwordContext=hasPasswordInput||[...refs.values()].some(ref=>/password/i.test(ref.name))||await page.locator('body').innerText({timeout:700}).then(text=>/\bpassword\b/i.test(text)).catch(()=>false);
+  const authentication=passwordContext?{
+    site_password_exists:'unknown',evidence_scope:'observed page controls/text; local credential metadata',
+    local_passwords:(()=>{try{return savedBrowserLogins(page.url()).slice(0,3).map(login=>({credential_id:login.id,username:login.username,state:login.passwordState,...(login.lastFilledAt?{last_filled_at:new Date(login.lastFilledAt).toISOString()}: {})}));}catch{return [];}})(),
+    site_acceptance:'not_established_by_local_storage',
+  }:undefined;
+  let text=formatBrowserSnapshot({observedAt,authentication,contexts,controls:lines,readable:readable.join('\n'),tree:trees.join('\n')},maxChars);
   for(const password of passwords)text=text.replaceAll(password,'[REDACTED_PASSWORD]');
   return {snapshotText:text,refs};
 }
@@ -1179,13 +1357,9 @@ export async function openBrowserSession(options: {
   restore?: boolean;
 }): Promise<{ ok: true; sessionId: string; output: string } | { ok: false; error: string }> {
   startBrowserIdleCleanup();
-  const openingCount = [...openingTabs.values()].reduce((sum, count) => sum + count, 0);
-  if (!options.restore&&sessions.size+dormantTabs.size + openingCount >= 24) return { ok: false, error: "Browser tab limit (24) reached. Close an unused tab first." };
   const openingForTask = openingTabs.get(options.ownerTaskId) ?? 0;
   if (!options.restore&&options.ownerTaskId !== "user" && countSessionsForTask(options.ownerTaskId) + openingForTask >= maxSessionsPerTask()) {
-    const openIds = [...sessions.entries()]
-      .filter(([, s]) => s.ownerTaskId === options.ownerTaskId)
-      .map(([id]) => id);
+    const openIds = browserWorkspaceState(options.ownerTaskId).tabs.map(tab=>tab.sessionId);
     return {
       ok: false,
       error:
@@ -1440,18 +1614,6 @@ async function resolveClickRef(page:Page,ref:string,refs:Map<string,SnapshotRef>
   return found?frame.locator(`[data-liminal-click-target="${token}"]`):locator;
 }
 
-async function selectBrowserOption(page:Page|Frame,locator:Locator,value:string,timeoutMs=15000):Promise<void>{
-  const options=await locator.evaluate(el=>el instanceof HTMLSelectElement?[...el.options].map(o=>({value:o.value,label:o.label})):null,undefined,{timeout:timeoutMs});
-  if(options){const option=options.find(o=>o.value===value)??options.find(o=>o.label===value);if(!option)throw new Error('Option not found. Available labels: '+options.map(o=>o.label).join(', '));await locator.selectOption(option.value,{timeout:timeoutMs});return;}
-  const editable=await locator.evaluate(el=>el instanceof HTMLInputElement&&!el.readOnly||(el as HTMLElement).isContentEditable,undefined,{timeout:timeoutMs});
-  if(editable)await locator.fill(value,{timeout:timeoutMs});else await locator.click({timeout:timeoutMs});
-  const controls=(await locator.getAttribute('aria-controls')??await locator.getAttribute('aria-owns'))?.trim().split(/\s+/)[0];
-  const scope=controls?page.locator(`[id=${JSON.stringify(controls)}]`):page;
-  const byValue=scope.locator(`[role="option"][data-value=${JSON.stringify(value)}]:visible`).first();
-  const option=await byValue.isVisible()?byValue:scope.getByRole('option',{name:value,exact:true}).first();
-  await option.click({timeout:timeoutMs});
-}
-
 async function resolveBrowserSelector(page:Page,selector:string):Promise<{target:Page|Frame;locator:Locator}>{
   const main=page.locator(selector);if(await main.count())return {target:page,locator:main};
   const candidates:{target:Frame;locator:Locator}[]=[];
@@ -1537,29 +1699,54 @@ export function parseActionsFromArgs(
   return [{ op: "wait_ms", ms: 400 }];
 }
 
+export function normalizeBrowserKey(key:string):string{
+  // Accept conventional compact shortcuts while preserving ordinary key names.
+  const match=/^(ControlOrMeta|Control|Ctrl|Shift|Alt|Meta|Cmd|Command)(End|Home|Enter|Escape|Backspace|Delete|Tab|ArrowLeft|ArrowRight|ArrowUp|ArrowDown|[A-Z])$/.exec(key);
+  if(!match)return key;
+  const modifier=match[1]==='Ctrl'?'Control':['Cmd','Command'].includes(match[1]!)?'Meta':match[1];
+  return modifier+'+'+match[2];
+}
+
 export function normalizeOneAction(
   item: unknown
 ): { op: BrowserActOp } | { error: string } {
   if (!item || typeof item !== "object" || Array.isArray(item))
     return { error: "Each action must be a JSON object with `op`." };
   const o = item as Record<string, unknown>;
+  if(o.op===undefined&&Object.keys(o).length===1&&typeof o.wait_ms==='number')return normalizeOneAction({op:'wait_ms',ms:o.wait_ms});
   const op = o["op"];
   if (typeof op !== "string" || !op.trim()) return { error: 'Each action needs string field "op".' };
 
   switch (op) {
+    case 'drag_at': {
+      const values=['from_x','from_y','to_x','to_y'].map(key=>o[key]);
+      if(values.some(n=>typeof n!=='number'||!Number.isFinite(n)||n<0||n>100000))return {error:'drag_at: finite non-negative from_x/from_y/to_x/to_y in current viewport CSS pixels'};
+      const duration=o.duration_ms??900;if(typeof duration!=='number'||!Number.isInteger(duration)||duration<100||duration>5000)return {error:'drag_at: duration_ms must be an integer from 100 to 5000'};
+      return {op:{op:'drag_at',from_x:values[0] as number,from_y:values[1] as number,to_x:values[2] as number,to_y:values[3] as number,duration_ms:duration}};
+    }
+    case "click_at": {
+      const x=o["x"],y=o["y"];
+      if(typeof x!=="number"||typeof y!=="number"||!Number.isFinite(x)||!Number.isFinite(y)||x<0||y<0||x>100000||y>100000)return {error:"click_at: finite non-negative x/y in the current screenshot's CSS viewport"};
+      return {op:{op:"click_at",x,y}};
+    }
+    case "type_text": {
+      const value=o["value"];
+      if(typeof value!=="string"||!value.length||value.length>16000)return {error:"type_text: non-empty value up to 16000 characters"};
+      return {op:{op:"type_text",value}};
+    }
     case "wait_ms": {
-      const ms = Number(o["ms"]);
+      const ms = Number(o["ms"] ?? o["value"] ?? o["wait_ms"]);
       if (!Number.isFinite(ms) || ms < 0 || ms > 120_000) return { error: "wait_ms: ms 0..120000" };
       return { op: { op: "wait_ms", ms } };
     }
     case "scroll": {
       const dir = String(o["direction"] ?? "").toLowerCase();
-      if (!["bottom", "top", "down", "up"].includes(dir))
-        return { error: "scroll: direction ∈ bottom|top|down|up" };
+      if (!["bottom", "top", "down", "up", "left", "right"].includes(dir))
+        return { error: "scroll: direction ∈ bottom|top|down|up|left|right" };
       const px = o["px"] === undefined ? undefined : Number(o["px"]);
       if (px !== undefined && (!Number.isFinite(px) || px < 1 || px > 32_000))
         return { error: "scroll: px 1..32000" };
-      const d = dir as "bottom" | "top" | "down" | "up";
+      const d = dir as "bottom" | "top" | "down" | "up" | "left" | "right";
       return {
         op: px !== undefined ? { op: "scroll", direction: d, px } : { op: "scroll", direction: d },
       };
@@ -1630,6 +1817,12 @@ export function normalizeOneAction(
           timeout_ms: clampTimeout(Number(o["timeout_ms"] ?? 15_000), 45_000),
         },
       };
+    }
+    case "press_and_hold_ref": {
+      const ref=String(o["ref"]??'').trim(),duration_ms=Number(o['duration_ms']);
+      if(!/^e\d+$/.test(ref))return {error:'press_and_hold_ref: ref like e1 from SNAPSHOT_REFS required'};
+      if(!Number.isInteger(duration_ms)||duration_ms<100||duration_ms>15000)return {error:'press_and_hold_ref: duration_ms must be an integer from 100 to 15000'};
+      return {op:{op:'press_and_hold_ref',ref,duration_ms,timeout_ms:clampTimeout(Number(o['timeout_ms']??15000),45000)}};
     }
     case "check_ref":
     case "uncheck_ref":
@@ -1716,7 +1909,7 @@ export function normalizeOneAction(
     case "press_key_ref": {
       const ref = shorten(String(o["ref"] ?? "").trim(), 16);
       if (!/^e\d+$/.test(ref)) return { error: "press_key_ref: ref like e1" };
-      const key = shorten(String(o["key"] ?? "").trim(), 40);
+      const key = normalizeBrowserKey(shorten(String(o["key"] ?? "").trim(), 40));
       if (!key) return { error: "press_key_ref: key required" };
       return {
         op: {
@@ -1750,7 +1943,7 @@ export function normalizeOneAction(
       };
     }
     case "press_key": {
-      const key = shorten(String(o["key"] ?? "").trim(), 40);
+      const key = normalizeBrowserKey(shorten(String(o["key"] ?? "").trim(), 40));
       if (!key) return { error: "press_key: key required" };
       return { op: { op: "press_key", key } };
     }
@@ -1829,11 +2022,26 @@ export async function clickBrowserControl(target: Page | Frame, locator: Locator
     })));
     throw Error(count ? `AMBIGUOUS_TARGET: ${count} matches; no click executed. Choose the intended observed ref or destination. Candidates: ${JSON.stringify(choices)}` : 'TARGET_NOT_FOUND: no matching element appeared. No click executed; use the fresh refs or browser_extract links instead of guessing another selector.');
   }
+  if(!await locator.isEnabled())throw Error('TARGET_DISABLED: no click executed. The observed control is disabled; inspect form validation or verification state before retrying.');
+  const associatedLabel = await browserAssociatedControlLabel(locator);
+  if (associatedLabel) {
+    const label = associatedLabel.startsWith('ancestor::') ? locator.locator('xpath=' + associatedLabel) : target.locator(associatedLabel);
+    if (await label.count() === 1) { await label.click({timeout:timeoutMs}); return; }
+  }
   if (!await locator.isVisible()) {
     await locator.waitFor({state:'visible',timeout:Math.min(timeoutMs,1500)}).catch(()=>{});
     if (!await locator.isVisible()) throw Error('TARGET_NOT_VISIBLE: no click executed. Inspect the returned current controls; do not force the click.');
   }
   const isLink = await locator.evaluate(el => el instanceof HTMLAnchorElement && /^https?:/.test(el.href) && !el.hasAttribute('download'), undefined, {timeout: Math.min(timeoutMs, 2000)});
+  if(!isLink){
+    await locator.scrollIntoViewIfNeeded({timeout:Math.min(timeoutMs,2000)});
+    const position=await browserContainerClickPosition(locator);
+    if(position===null){
+      const editable=await locator.evaluate(el=>el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement||(el as HTMLElement).isContentEditable);
+      throw Error('TARGET_NOT_HITTABLE: no exposed point belongs to the requested control. It is covered by other content or nested controls. '+(editable?'For text entry, focus_ref can focus this observed editable control without clicking through its overlay.':'Choose the intended visible control.')+' No click executed.');
+    }
+    if(position){await locator.click({position,timeout:timeoutMs});return;}
+  }
   let actual = locator;
   if (isLink) {
     await locator.scrollIntoViewIfNeeded({timeout: Math.min(timeoutMs, 2000)});
@@ -1858,14 +2066,18 @@ class BrowserActionError extends Error {
 
 export async function runBrowserActions(
   session: BrowserSession,
-  ops: BrowserActOp[]
-): Promise<{ urlChanged: boolean }> {
+  ops: BrowserActOp[],
+  signal?:AbortSignal
+): Promise<{ urlChanged: boolean; copiedLinks:string[] }> {
   const page = session.page;
   assertPageWithinFileRoots(page);
+  session.lastScroll=undefined;
   let urlChanged = false;
   const navTimeoutDefault = parseHarnessMs("AGENT_BROWSER_NAV_TIMEOUT_MS", 45_000, 120_000);
-
+  const finishCopy=await observeBrowserCopyLinks(page);
+  try{
   for (let i = 0; i < ops.length; i++) {
+    signal?.throwIfAborted();
     if (session.paused) throw new Error("User takeover is active. Resume agent control before continuing.");
     const a = ops[i]!;
     const label = `#${i + 1}:${a.op}`;
@@ -1892,17 +2104,21 @@ export async function runBrowserActions(
         case "wait_ms":
           await new Promise<void>((r) => setTimeout(r, Math.min(a.ms, 120_000)));
           break;
+        case "click_at": {
+          const viewport=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+          if(!Number.isFinite(a.x)||!Number.isFinite(a.y)||a.x<0||a.y<0||a.x>=viewport.width||a.y>=viewport.height)throw new Error('click_at: point outside the current CSS viewport '+JSON.stringify(viewport)+'. Coordinates must satisfy 0 <= x < width and 0 <= y < height. Use a current observed ref for embedded controls. No click executed.');
+          await page.mouse.click(a.x,a.y);
+          break;
+        }
+        case 'drag_at':
+          await dragBrowserPointer(page,a,signal);
+          break;
+        case "type_text":
+          if(!a.value||a.value.length>16000)throw new Error('type_text: non-empty value up to 16000 characters');
+          await page.keyboard.insertText(a.value);
+          break;
         case "scroll": {
-          const px = a.px ?? 1200;
-          await page.evaluate(
-            ({ d, n }) => {
-              if (d === "bottom") window.scrollTo(0, document.body.scrollHeight);
-              else if (d === "top") window.scrollTo(0, 0);
-              else if (d === "down") window.scrollBy(0, n);
-              else if (d === "up") window.scrollBy(0, -n);
-            },
-            { d: a.direction, n: px }
-          );
+          session.lastScroll=await scrollBrowserPage(page,a.direction,a.px??1200);
           break;
         }
         case "wait_selector":
@@ -1931,6 +2147,9 @@ export async function runBrowserActions(
           break;
         case "double_click_text":
           await page.getByText(a.text,{exact:a.exact??true}).dblclick({timeout:a.timeout_ms??15000});
+          break;
+        case "press_and_hold_ref":
+          await holdBrowserControl(resolveRefLocator(page,a.ref,session.refs),a.duration_ms,a.timeout_ms??15000,signal);
           break;
         case "click_ref":
           await clickBrowserControl(session.refs.get(a.ref)?.frame??page,await resolveClickRef(page, a.ref, session.refs),a.timeout_ms??15000);
@@ -2024,7 +2243,8 @@ export async function runBrowserActions(
   }
   session.currentUrl = page.url();
   touchSession(session);
-  return { urlChanged };
+  return { urlChanged, copiedLinks:await finishCopy() };
+  }finally{await finishCopy();}
 }
 
 export function browserArtifactPath(prefix: string, ext: "png" | "jpg" = "png"): string {
@@ -2041,6 +2261,7 @@ export async function actOnBrowserSession(options: {
   refreshSnapshot: boolean;
   includeConsole: boolean;
   compactObservation?: boolean;
+  signal?:AbortSignal;
 }): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const session = sessions.get(options.sessionId);
   if (!session) return { ok: false, error: `Unknown session_id: ${options.sessionId}` };
@@ -2048,7 +2269,21 @@ export async function actOnBrowserSession(options: {
   touchSession(session);
   try {
     return await withBrowserWall(async () => {
-    const { urlChanged } = await runBrowserActions(session, options.actions);
+    const fingerprint=JSON.stringify(options.actions.filter(a=>a.op!=='wait_ms'));
+    const previous=session.lastActionObservation;
+    if(previous&&previous.actions===fingerprint&&previous.unchanged>=2){
+      const fresh=await buildPageSnapshot(session.page);
+      let visualStable=true;
+      if(previous.visualHash){
+        const pixels=await session.page.screenshot({type:'jpeg',quality:65,scale:'css',fullPage:false,style:browserScreenshotPrivacyStyle,timeout:5000});
+        visualStable=createHash('sha256').update(pixels).digest('hex')===previous.visualHash;
+      }else if(await session.page.locator('canvas').count())visualStable=false;
+      if(visualStable&&fresh.snapshotText.split('\n').slice(1).join('\n')===previous.state){
+        session.refs=fresh.refs;
+        return {ok:false as const,error:'NO_PROGRESS: This exact action batch already repeated without a page-state change. No further click executed. Choose the intended exposed control from this fresh observation, dismiss an overlay or change approach.\n'+observationFor(session,fresh.snapshotText,true)};
+      }
+    }
+    const { urlChanged, copiedLinks } = await runBrowserActions(session, options.actions,options.signal);
     const postWait = defaultPostWaitForUrl(session.page.url(), options.postActionWaitMs);
     if (postWait > 0) {
       await new Promise<void>((r) => setTimeout(r, postWait));
@@ -2059,6 +2294,10 @@ export async function actOnBrowserSession(options: {
     if (needSnapshot) {
       const { snapshotText, refs } = await buildPageSnapshot(session.page);
       session.refs = refs;
+      const state=snapshotText.split('\n').slice(1).join('\n');
+      const meaningful=options.actions.filter(a=>a.op!=='wait_ms');
+      const repeatable=meaningful.length>0&&meaningful.every(a=>['click_at','click_ref','click_text','click_selector','double_click_ref','double_click_text'].includes(a.op)||(['press_key','press_key_ref'].includes(a.op)&&'key' in a&&/Enter|Backspace|Delete|Tab/.test(a.key)));
+      session.lastActionObservation={state,actions:fingerprint,visualHash:previous?.visualHash,unchanged:repeatable&&previous?.state===state&&previous.actions===fingerprint?previous.unchanged+1:0};
       extra = `\n${observationFor(session,snapshotText,!options.compactObservation)}\n`;
     }
     const diag = options.includeConsole ? formatDiagnosticsOutput(session.diagnostics) : "";
@@ -2069,7 +2308,7 @@ export async function actOnBrowserSession(options: {
     return {
       ok: true,
       output:
-        `SESSION_ID: ${options.sessionId}\nACTIONS_EXECUTED: ${options.actions.length}\nURL: ${session.currentUrl}\n${extra || "OBSERVATION_NOT_REFRESHED: requested refresh_snapshot=false; use browser_snapshot when needed."}${shotLine}${diag}`,
+        `SESSION_ID: ${options.sessionId}\nACTIONS_EXECUTED: ${options.actions.length}\nURL: ${session.currentUrl}\n${copiedLinks.length?'PAGE_COPY_LINKS: '+JSON.stringify(copiedLinks)+'\n':''}${session.lastScroll?'SCROLL_RESULT: '+JSON.stringify(session.lastScroll)+'\n':''}${extra || "OBSERVATION_NOT_REFRESHED: requested refresh_snapshot=false; use browser_snapshot when needed."}${shotLine}${diag}`,
     };
     });
   } catch (err) {
@@ -2278,7 +2517,7 @@ export function restoreBrowserWorkspace(): Promise<void> {
     const workspace = readBrowserWorkspace();
     selectedTaskTabs.clear();
     for (const [owner, id] of Object.entries(workspace.selectedTabs)) selectedTaskTabs.set(owner, id);
-    const saved = workspace.tabs.slice(0, 24);
+    const saved = workspace.tabs;
     for (const tab of saved) {
       if (sessions.has(tab.sessionId) || !/^https?:\/\//.test(tab.url)) continue;
       const resolved = resolveBrowseHref(tab.url);
@@ -2379,67 +2618,57 @@ export async function shutdownBrowserWorkspace(): Promise<void> {
 
 export type CaptchaType = "recaptcha_v2" | "recaptcha_v3" | "hcaptcha" | "turnstile";
 
+/** Ground visual targets in actual observed nodes, including nested frames. */
+export async function browserVisualTarget(sessionId:string,ref:string){
+ const session=sessions.get(sessionId),meta=session?.refs.get(ref);
+ if(!session||!meta?.visual||!/^e\d+$/.test(ref))throw Error('Unknown visual ref. Use captcha_inspect for the current canvas.');
+ const locator=resolveRefLocator(session.page,ref,session.refs),box=await locator.boundingBox({timeout:2500});
+ if(!box)throw Error('Visual target is no longer visible. Inspect the current page.');
+ const viewport=await session.page.evaluate(()=>({width:innerWidth,height:innerHeight}));
+ if(box.x<0||box.y<0||box.x+box.width>viewport.width||box.y+box.height>viewport.height)throw Error('Visual target is partly outside the viewport. Scroll it into view and inspect again.');
+ return {page:session.page,box,ref};
+}
+export async function inspectBrowserVisualTargets(sessionId:string){
+ const session=sessions.get(sessionId);if(!session)throw Error('Browser session unavailable');
+ const snapshot=await buildPageSnapshot(session.page);session.refs=snapshot.refs;
+ const targets=[];
+ for(const [ref,meta] of session.refs){if(!meta.visual)continue;try{const target=await browserVisualTarget(sessionId,ref);targets.push({ref,...target.box});}catch{/* Offscreen targets need scrolling, not guessed coordinates. */}}
+ return {targets:targets.slice(0,3),snapshot:snapshot.snapshotText};
+}
+
 export interface CaptchaSignal {
   type: CaptchaType;
   siteKey: string | null;
   pageUrl: string;
+  presentation?: "background" | "visible_widget";
 }
 
 export async function detectCaptchaSignals(page: Page): Promise<CaptchaSignal | null> {
   assertPageWithinFileRoots(page);
   try {
-    const result = await page.evaluate((): { type: string; siteKey: string | null } | null => {
-      // Cloudflare Turnstile — check before generic data-sitekey
-      const tsEl = document.querySelector<HTMLElement>(".cf-turnstile,[data-cf-turnstile]");
-      if (tsEl || document.querySelector('script[src*="challenges.cloudflare.com"]')) {
-        const sk = tsEl?.getAttribute("data-sitekey") || null;
-        return { type: "turnstile", siteKey: sk };
-      }
-      // hCaptcha
-      const hcEl = document.querySelector<HTMLElement>(".h-captcha,[data-hcaptcha-sitekey]");
-      if (hcEl || document.querySelector('script[src*="hcaptcha.com"]')) {
-        const sk = hcEl?.getAttribute("data-sitekey") || hcEl?.getAttribute("data-hcaptcha-sitekey") || null;
-        return { type: "hcaptcha", siteKey: sk };
-      }
-      // reCAPTCHA v3 — invisible, identified by script or grecaptcha.execute usage
-      if (document.querySelector('script[src*="recaptcha"][src*="v3"],script[src*="recaptcha/api.js?render"]')) {
-        const siteKeyMatch = Array.from(document.querySelectorAll("script"))
-          .map((s) => s.src)
-          .join(" ")
-          .match(/render=([A-Za-z0-9_-]{30,})/);
-        return { type: "recaptcha_v3", siteKey: siteKeyMatch?.[1] ?? null };
-      }
-      // reCAPTCHA v2 — visible widget or invisible checkbox
-      const rcEl = document.querySelector<HTMLElement>(".g-recaptcha,[data-sitekey]");
-      if (rcEl || document.querySelector('script[src*="recaptcha"]')) {
-        return { type: "recaptcha_v2", siteKey: rcEl?.getAttribute("data-sitekey") || null };
-      }
-      // Iframe-based detection (after DOM patching)
-      const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenges.cloudflare"]'
-      );
-      if (iframe) {
-        const src = iframe.src;
-        if (src.includes("hcaptcha")) return { type: "hcaptcha", siteKey: null };
-        if (src.includes("challenges.cloudflare")) return { type: "turnstile", siteKey: null };
-        return { type: "recaptcha_v2", siteKey: null };
-      }
-      return null;
-    });
-    if (!result || !result.type) return null;
-    return { type: result.type as CaptchaType, siteKey: result.siteKey, pageUrl: page.url() };
+    const result = await page.evaluate(inspectBrowserVerification);
+    return result ? { ...result, pageUrl: page.url() } : null;
   } catch {
     return null;
   }
 }
 
 export function formatCaptchaHint(signal: CaptchaSignal): string {
-  const skNote = signal.siteKey ? `site_key="${signal.siteKey}"` : "site_key=(auto-detected by captcha_solve)";
-  return (
-    `\n[CAPTCHA DETECTED: type=${signal.type}, ${skNote}]\n` +
-    `→ Call captcha_solve(type="${signal.type}", site_key="${signal.siteKey ?? ""}", page_url="${signal.pageUrl}")\n` +
-    `→ Then browser_act to submit the form after injection.\n`
-  );
+  if (signal.presentation === "background") {
+    return '\nVERIFICATION: background integration only; no visible challenge observed. Continue the current form.\n';
+  }
+  return '\nVERIFICATION: visible ' + signal.type + ' widget observed. Inspect its current state; this does not establish a phone requirement or that the form is blocked.\n';
+}
+
+/** Observe application state without exposing a response token or assuming validity. */
+export async function readCaptchaSubmissionState(sessionId:string){
+  const session=sessions.get(sessionId);if(!session)throw Error(`Unknown session_id: ${sessionId}`);
+  return session.page.evaluate(()=>({
+    response_present:[...document.querySelectorAll<HTMLInputElement|HTMLTextAreaElement>('[name="g-recaptcha-response"],[name="h-captcha-response"],[name="cf-turnstile-response"]')].some(el=>!!el.value.trim()),
+    enabled_submit_controls:[...document.querySelectorAll<HTMLButtonElement|HTMLInputElement>('button[type="submit"],input[type="submit"],form button:not([type])')]
+      .filter(el=>!el.disabled&&el.getClientRects().length>0).map(el=>(el.getAttribute('aria-label')||el.textContent||el.value||'submit').trim().slice(0,80)),
+    site_acceptance:'not_observed' as const,
+  }));
 }
 
 /** Inject a solved CAPTCHA token into the page DOM and fire the required events. */
@@ -2452,9 +2681,11 @@ export async function injectCaptchaToken(
   if (!session) return { ok: false, error: `Unknown session_id: ${sessionId}` };
   touchSession(session);
   try {
-    await session.page.evaluate(
+    const applied=await session.page.evaluate(
       ({ t, tok }: { t: string; tok: string }) => {
+        const fields=new Set<Element>();let callbacks=0;
         function fireEvents(el: Element) {
+          fields.add(el);
           el.dispatchEvent(new Event("input", { bubbles: true }));
           el.dispatchEvent(new Event("change", { bubbles: true }));
         }
@@ -2466,11 +2697,14 @@ export async function injectCaptchaToken(
             '[name="g-recaptcha-response"]',
           ]) {
             const el = document.querySelector<HTMLTextAreaElement>(sel);
-            if (el) { el.value = tok; el.style.display = "block"; fireEvents(el); }
+            if (el) { el.value = tok; fireEvents(el); }
           }
           // Trigger grecaptcha callback if present
           const w = window as Window & { grecaptcha?: { enterprise?: { getResponse?: () => string } }; __recaptchaCallback?: (t: string) => void };
-          if (w.__recaptchaCallback) w.__recaptchaCallback(tok);
+          if (w.__recaptchaCallback){w.__recaptchaCallback(tok);callbacks++;}
+          const cb=document.querySelector('.g-recaptcha[data-callback]')?.getAttribute('data-callback');
+          const fn=cb?(window as unknown as Record<string,unknown>)[cb]:undefined;
+          if(typeof fn==='function'&&fn!==w.__recaptchaCallback){(fn as (t:string)=>void)(tok);callbacks++;}
         } else if (t === "hcaptcha") {
           for (const sel of ['[name="h-captcha-response"]', 'textarea[name="h-captcha-response"]']) {
             const el = document.querySelector<HTMLTextAreaElement>(sel);
@@ -2481,7 +2715,7 @@ export async function injectCaptchaToken(
           const cb = hEl?.getAttribute("data-callback");
           if (cb) {
             const fn = (window as unknown as Record<string, unknown>)[cb];
-            if (typeof fn === "function") (fn as (t: string) => void)(tok);
+            if (typeof fn === "function"){(fn as (t: string) => void)(tok);callbacks++;}
           }
         } else if (t === "turnstile") {
           for (const sel of ['[name="cf-turnstile-response"]', 'input[name="cf-turnstile-response"]']) {
@@ -2493,21 +2727,26 @@ export async function injectCaptchaToken(
           const cb = tsEl?.getAttribute("data-callback");
           if (cb) {
             const fn = (window as unknown as Record<string, unknown>)[cb];
-            if (typeof fn === "function") (fn as (t: string) => void)(tok);
+            if (typeof fn === "function"){(fn as (t: string) => void)(tok);callbacks++;}
           }
         }
+        return {fields:fields.size,callbacks};
       },
       { t: type, tok: token }
     );
-    return { ok: true, output: `CAPTCHA_INJECTED: type=${type}, token_length=${token.length}` };
+    if(!applied.fields&&!applied.callbacks)return {ok:false,error:'The page no longer has a matching verification response field or callback. Nothing was applied. Inspect the current page before requesting another solution.'};
+    const form=await readCaptchaSubmissionState(sessionId);
+    return { ok: true, output: `CAPTCHA_INJECTED: type=${type}, fields=${applied.fields}, callbacks=${applied.callbacks}, token_length=${token.length}\n`+
+      JSON.stringify({verification_state:'solution_applied_pending_submission',...form})+
+      (form.enabled_submit_controls.length?'\nThe form has an enabled submit control. Submit the existing form; if a challenge overlay covers it, dismiss the overlay with Escape first. Token application can leave the checkbox graphics unchanged; that alone does not mean rejection.':'\nInspect the current form for its next step or validation error.') };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: (err instanceof Error ? err.message : String(err)).replaceAll(token,'[REDACTED_SOLUTION]') };
   }
 }
 
 // ─── Wait-for conditions ───────────────────────────────────────────────────────
 
-export async function waitForInSession(
+async function waitForInSessionCondition(
   sessionId: string,
   opts: {
     condition: "selector" | "selector_hidden" | "text" | "url_contains" | "network_idle";
@@ -2566,6 +2805,16 @@ export async function waitForInSession(
   }
 }
 
+/** Return the actual post-wait screen, including on a condition timeout. A
+ * successful network-idle wait need not mean onboarding or form submission ended. */
+export async function waitForInSession(sessionId:string,opts:Parameters<typeof waitForInSessionCondition>[1]):Promise<{ok:true;output:string}|{ok:false;error:string}>{
+ const result=await waitForInSessionCondition(sessionId,opts);
+ if(!sessions.has(sessionId))return result;
+ const observed=await snapshotBrowserSession(sessionId,false);
+ if(!observed.ok)return result;
+ return result.ok?{ok:true,output:result.output+'\n'+observed.output}:{ok:false,error:result.error+'\nCURRENT_PAGE_AFTER_WAIT:\n'+observed.output};
+}
+
 // ─── Structured data extraction ────────────────────────────────────────────────
 
 export type ExtractType =
@@ -2595,7 +2844,7 @@ export async function extractFromSession(
       const forms:Record<string,unknown>[]=[];
       for(const frame of session.page.frames()){
         if(frame!==session.page.mainFrame()){const host=await frame.frameElement().catch(()=>null);if(!host||!await host.isVisible().catch(()=>false))continue;}
-        const observed=await frame.evaluate(({hidden})=>{
+        const observed=await frame.evaluate(({hidden,privateInputSelector})=>{
           const roots:(Document|ShadowRoot)[]=[document];
           for(let i=0;i<roots.length;i++)for(const el of roots[i]!.querySelectorAll('*'))if(el.shadowRoot)roots.push(el.shadowRoot);
           const controls=roots.flatMap(root=>[...root.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>('input,textarea,select')]).filter(el=>hidden||el.type!=='hidden'&&el.getClientRects().length>0&&!el.closest('[hidden],[inert],[aria-hidden="true"]'));
@@ -2603,11 +2852,11 @@ export async function extractFromSession(
           for(const el of controls){const group=groups.get(el.form)??[];group.push(el);groups.set(el.form,group);}
           return [...groups].map(([form,fields])=>({action:form?.action??null,method:form?.method??null,unowned:form===null,fields:fields.map(el=>({
             tag:el.tagName.toLowerCase(),type:el.type,name:el.name||null,id:el.id||null,label:el.getAttribute('aria-label')||[...(el.labels??[])].map(label=>label.textContent?.trim()).join(' ')||null,
-            placeholder:el.getAttribute('placeholder'),value:el.type==='password'?null:el.value||null,password_filled:el.type==='password'?!!el.value:undefined,required:el.required,disabled:el.disabled,
+            placeholder:el.getAttribute('placeholder'),value:el.matches(privateInputSelector)?null:el.value||null,password_filled:el.matches(privateInputSelector)?!!el.value:undefined,required:el.required,disabled:el.disabled,
             checked:el instanceof HTMLInputElement&&['checkbox','radio'].includes(el.type)?el.checked:undefined,
             options:el instanceof HTMLSelectElement?[...el.options].map(o=>({label:o.label,value:o.value,selected:o.selected})):undefined,validation:!el.validity.valid?el.validationMessage:null,
           }))}));
-        },{hidden:includeHidden});
+        },{hidden:includeHidden,privateInputSelector:browserPrivateInputSelector});
         forms.push(...observed.map(form=>({...form,frame_origin:new URL(frame.url()).origin})));
       }
       return {ok:true,output:JSON.stringify(forms,null,2)};
@@ -2633,23 +2882,24 @@ export async function extractFromSession(
         }
         const folded=(text:string)=>text.normalize('NFKC').replace(/[\u2010-\u2015\u2212-]/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
         const queryTerms=[...new Set(folded(query??'').match(/[\p{L}\p{N}]+/gu)??[])];
-        const allTerms=(text:string)=>{
-          const words=new Set(folded(text).match(/[\p{L}\p{N}]+/gu)??[]);
-          return queryTerms.length>=2&&queryTerms.every(term=>words.has(term));
-        };
+        const allTerms=(text:string)=>{const words=new Set(folded(text).match(/[\p{L}\p{N}]+/gu)??[]);return queryTerms.length>=2&&queryTerms.every(term=>words.has(term));};
         function renderedText(root:Node,range?:Range):string {
-          const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),pieces:string[]=[];
+          const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT),pieces:string[]=[];
           let previous:Element|null=null,lastStrike:Element|null=null;
           for(let node=walker.nextNode();node;node=walker.nextNode()){
-            const parent=node.parentElement,text=node.textContent?.replace(/\s+/g,' ').trim();
+            const isBreak=node.nodeType===Node.ELEMENT_NODE&&node.nodeName==='BR';
+            if(!isBreak&&node.nodeType!==Node.TEXT_NODE)continue;
+            const parent=node.parentElement,text=isBreak?'\n':node.textContent?.replace(/\s+/g,' ');
             if(!parent||!text||parent.closest('select,option,script,style,noscript')||!textVisible(parent)||range&&!range.intersectsNode(node))continue;
+            if(isBreak){if(textVisible(node as Element))pieces.push('\n');continue;}
             const block=parent.closest('p,div,li,tr,td,th,h1,h2,h3,h4,h5,h6,article,section,main,body');
+            if(!text.trim()){if(previous===block&&pieces.length)pieces.push(' ');continue;}
             let strike=parent.closest('del,s,strike');
             if(!strike)for(let el:Element|null=parent;el;el=el.parentElement){if(getComputedStyle(el).textDecorationLine.includes('line-through')){strike=el;break;}}
-            pieces.push((pieces.length?(block===previous?' ':'\n'):'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
+            pieces.push((pieces.length&&block!==previous?'\n':'')+(strike&&strike!==lastStrike?'[struck through] ':'')+text);
             previous=block;lastStrike=strike;
           }
-          return pieces.join('');
+          return pieces.join('').replace(/ +\n/g,'\n').replace(/\n +/g,'\n').trim();
         }
         let linkIndex = 0;
         function linksFrom(elements: HTMLAnchorElement[]) {
@@ -2691,13 +2941,12 @@ export async function extractFromSession(
               const header=table.tHead?.contains(row)||rowIndex===0&&[...row.cells].every(cell=>cell.tagName==='TH');
               if(header){headers=[...values];continue;}
               const text=values.map((value,i)=>`${headers[i]||'Column '+(i+1)}: ${value??''}`).join('\n');
-              const exact=!query?.trim()||folded(text).includes(folded(query));
-              if(sourced&&(exact||allTerms(text)))results.push({table:tableIndex,caption,row:rowIndex,text,...(!exact?{match_kind:'all_terms'}:{})});
+                const exact=!query?.trim()||folded(text).includes(folded(query));
+                if(sourced&&(exact||allTerms(text)))results.push({table:tableIndex,caption,row:rowIndex,text,...(!exact?{match_kind:'all_terms'}:{})});
             }
             if(!sourced)results.push({caption,rows:grid});
           }
-          if(sourced&&query?.trim()&&results.some(row=>!(row as {match_kind?:string}).match_kind))
-            return results.filter(row=>!(row as {match_kind?:string}).match_kind);
+          if(sourced&&query?.trim()&&results.some(row=>!(row as {match_kind?:string}).match_kind))return results.filter(row=>!(row as {match_kind?:string}).match_kind);
           return results;
         }
         if (ty === "links") {

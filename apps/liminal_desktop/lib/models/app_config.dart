@@ -5,6 +5,8 @@ import '../audio/wake_voice.dart';
 class AppConfig {
   AppConfig({
     required this.apiKeyConfigured,
+    this.providerVerified = false,
+    this.providerManaged = false,
     required this.personaBootstrapEnabled,
     required this.personaBootstrapPending,
     required this.personaBootstrapAllowSkip,
@@ -27,6 +29,8 @@ class AppConfig {
   });
 
   final bool apiKeyConfigured;
+  final bool providerVerified;
+  final bool providerManaged;
   final bool personaBootstrapEnabled;
   final bool personaBootstrapPending;
   final bool personaBootstrapAllowSkip;
@@ -66,6 +70,8 @@ class AppConfig {
 
   AppConfig copyWith({
     bool? apiKeyConfigured,
+    bool? providerVerified,
+    bool? providerManaged,
     bool? personaBootstrapEnabled,
     bool? personaBootstrapPending,
     bool? personaBootstrapAllowSkip,
@@ -88,9 +94,14 @@ class AppConfig {
   }) {
     return AppConfig(
       apiKeyConfigured: apiKeyConfigured ?? this.apiKeyConfigured,
-      personaBootstrapEnabled: personaBootstrapEnabled ?? this.personaBootstrapEnabled,
-      personaBootstrapPending: personaBootstrapPending ?? this.personaBootstrapPending,
-      personaBootstrapAllowSkip: personaBootstrapAllowSkip ?? this.personaBootstrapAllowSkip,
+      providerVerified: providerVerified ?? this.providerVerified,
+      providerManaged: providerManaged ?? this.providerManaged,
+      personaBootstrapEnabled:
+          personaBootstrapEnabled ?? this.personaBootstrapEnabled,
+      personaBootstrapPending:
+          personaBootstrapPending ?? this.personaBootstrapPending,
+      personaBootstrapAllowSkip:
+          personaBootstrapAllowSkip ?? this.personaBootstrapAllowSkip,
       personaDisplayLabel: personaDisplayLabel ?? this.personaDisplayLabel,
       providerModel: providerModel ?? this.providerModel,
       providerBaseUrl: providerBaseUrl ?? this.providerBaseUrl,
@@ -102,10 +113,14 @@ class AppConfig {
       ttsEnabled: ttsEnabled ?? this.ttsEnabled,
       ttsVoice: ttsVoice ?? this.ttsVoice,
       dictationAudioCue: dictationAudioCue ?? this.dictationAudioCue,
-      dictationMinRecordingMs: dictationMinRecordingMs ?? this.dictationMinRecordingMs,
-      dictationSilenceMsShort: dictationSilenceMsShort ?? this.dictationSilenceMsShort,
-      dictationSilenceMsLong: dictationSilenceMsLong ?? this.dictationSilenceMsLong,
-      dictationMaxRecordingMs: dictationMaxRecordingMs ?? this.dictationMaxRecordingMs,
+      dictationMinRecordingMs:
+          dictationMinRecordingMs ?? this.dictationMinRecordingMs,
+      dictationSilenceMsShort:
+          dictationSilenceMsShort ?? this.dictationSilenceMsShort,
+      dictationSilenceMsLong:
+          dictationSilenceMsLong ?? this.dictationSilenceMsLong,
+      dictationMaxRecordingMs:
+          dictationMaxRecordingMs ?? this.dictationMaxRecordingMs,
       wakeVoice: wakeVoice ?? this.wakeVoice,
     );
   }
@@ -118,11 +133,16 @@ class AppConfig {
       if (v is num) return v.round();
       return fallback;
     }
+
     return AppConfig(
       apiKeyConfigured: json['apiKeyConfigured'] as bool? ?? false,
+      providerVerified: json['providerVerified'] as bool? ?? false,
+      providerManaged: json['providerManaged'] as bool? ?? false,
       personaBootstrapEnabled: json['personaBootstrapEnabled'] as bool? ?? true,
-      personaBootstrapPending: json['personaBootstrapPending'] as bool? ?? false,
-      personaBootstrapAllowSkip: json['personaBootstrapAllowSkip'] as bool? ?? true,
+      personaBootstrapPending:
+          json['personaBootstrapPending'] as bool? ?? false,
+      personaBootstrapAllowSkip:
+          json['personaBootstrapAllowSkip'] as bool? ?? true,
       personaDisplayLabel: json['personaDisplayLabel'] as String? ?? 'Liminal',
       providerModel: provider['model'] as String? ?? '',
       providerBaseUrl: provider['baseURL'] as String? ?? '',
@@ -140,7 +160,9 @@ class AppConfig {
             )
           : null,
       ttsEnabled: json['ttsEnabled'] as bool? ?? false,
-      wakeVoice: WakeVoiceSettings.fromJson((json['wakeVoice'] as Map?)?.cast<String, dynamic>()),
+      wakeVoice: WakeVoiceSettings.fromJson(
+        (json['wakeVoice'] as Map?)?.cast<String, dynamic>(),
+      ),
       ttsVoice: json['ttsVoice'] as String? ?? 'af_sky',
       dictationAudioCue: json['dictationAudioCue'] as bool? ?? false,
       dictationMinRecordingMs: ms('dictationMinRecordingMs', 1500),

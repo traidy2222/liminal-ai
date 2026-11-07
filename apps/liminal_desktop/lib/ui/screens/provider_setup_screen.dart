@@ -13,7 +13,36 @@ class _SetupScreenState extends State<SetupScreen> {
   final _key = TextEditingController(), _model = TextEditingController();
   final _base = TextEditingController(text: 'https://openrouter.ai/api/v1');
   final _filter = TextEditingController();
-  bool _local = false, _loading = false;
+  bool _local = false,
+      _loading = false,
+      _initialized = false,
+      _savedKey = false;
+  String? _savedBase;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialized) return;
+    _initialized = true;
+    final cfg = AppScope.of(context).config;
+    if (cfg == null) return;
+    _savedKey = cfg.apiKeyConfigured;
+    _savedBase = cfg.providerBaseUrl;
+    if (cfg.providerBaseUrl.isNotEmpty) _base.text = cfg.providerBaseUrl;
+    _model.text = cfg.providerModel;
+    final host = Uri.tryParse(_base.text)?.host.toLowerCase() ?? '';
+    final octets = host.split('.').map(int.tryParse).toList();
+    final ipv4 = RegExp(r'^\d{1,3}(?:\.\d{1,3}){3}$').hasMatch(host) &&
+        octets.every((part) => part != null && part >= 0 && part <= 255);
+    _local = host == 'localhost' || host == '::1' ||
+        (ipv4 && (octets[0] == 127 || octets[0] == 10 ||
+            (octets[0] == 192 && octets[1] == 168) ||
+            (octets[0] == 172 && octets[1]! >= 16 && octets[1]! <= 31)));
+  }
+
+  bool get _canReuseKey =>
+      _savedKey &&
+      _base.text.trim().replaceAll(RegExp(r'/+$'), '') ==
+          _savedBase?.replaceAll(RegExp(r'/+$'), '');
   String? _error;
   List<Map<String, dynamic>> _models = [];
   @override
@@ -71,7 +100,7 @@ class _SetupScreenState extends State<SetupScreen> {
       apiKey: _key.text,
       model: _model.text,
       baseUrl: _base.text,
-      requireApiKey: !_local,
+      requireApiKey: !_local && !_canReuseKey,
     );
   }
 
@@ -172,7 +201,9 @@ class _SetupScreenState extends State<SetupScreen> {
               labelText: _local ? 'Server key (optional)' : 'API key',
               hintText: _local
                   ? 'Leave empty for an unauthenticated local server'
-                  : 'sk-or-v1-…',
+                  : (_canReuseKey
+                        ? 'Saved key will be verified'
+                        : 'sk-or-v1-…'),
             ),
           ),
           const SizedBox(height: 12),
@@ -236,7 +267,7 @@ class _SetupScreenState extends State<SetupScreen> {
             onPressed:
                 busy ||
                     _model.text.trim().isEmpty ||
-                    (!_local && _key.text.trim().length < 8)
+                    (!_local && !_canReuseKey && _key.text.trim().length < 8)
                 ? null
                 : _continue,
             child: Text(

@@ -839,7 +839,7 @@ async function runWebFetchInner(
         `Direct image URL: ${url}\n` +
         `content-type: ${ct || "unknown"}\n` +
         `content-length: ${size}\n` +
-        `Hint: pass this URL (or a downloaded local file) to vision_analyze for image understanding.`,
+        `Hint: load a downloaded local image with upload_image for the active model's native image input.`,
     };
   }
   if (ct.includes("application/pdf") || url.toLowerCase().endsWith(".pdf")) {
@@ -911,7 +911,7 @@ async function runWebFetchInner(
       "## Discovered image links",
       ...assets.images.map((u, i) => `${i + 1}. ${u}`),
       "",
-      "Hint: use vision_analyze on the most relevant image URL or local image file."
+      "Hint: load the relevant local image with upload_image for native image input."
     );
   }
 

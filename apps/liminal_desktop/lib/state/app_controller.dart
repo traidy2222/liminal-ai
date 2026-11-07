@@ -128,10 +128,19 @@ class AppController extends ChangeNotifier {
     unawaited(usage.initialize());
   }
 
-  Future<Map<String,dynamic>> manageProcedures(String chatId,String action,Map<String,dynamic> data) async {
-    final result=await _protocol.send('procedure_manage',{'chatId':chatId,'action':action,...data});
-    if(!result.ok)throw StateError(result.error??'Procedure request failed');
-    return Map<String,dynamic>.from(result.data as Map? ?? {});
+  Future<Map<String, dynamic>> manageProcedures(
+    String chatId,
+    String action,
+    Map<String, dynamic> data,
+  ) async {
+    final result = await _protocol.send('procedure_manage', {
+      'chatId': chatId,
+      'action': action,
+      ...data,
+    });
+    if (!result.ok)
+      throw StateError(result.error ?? 'Procedure request failed');
+    return Map<String, dynamic>.from(result.data as Map? ?? {});
   }
 
   late final UpdateCoordinator updates;
@@ -172,6 +181,7 @@ class AppController extends ChangeNotifier {
   Timer? _connectionNoticeTimer;
   int _missedConnectionPings = 0;
   bool _reconnectInFlight = false;
+  int _sendRequestSequence = 0;
   AppConfig? config;
   bool configLoading = false;
   bool sidecarReady = false;
@@ -292,7 +302,18 @@ class AppController extends ChangeNotifier {
   String? inboxToastMessage;
   String? inboxLastScanMessage;
 
-  bool get needsProviderSetup => config != null && !config!.apiKeyConfigured;
+  bool _providerSetupRequested = false;
+  void requestProviderSetup() {
+    _providerSetupRequested = true;
+    notifyListeners();
+  }
+
+  bool get needsProviderSetup =>
+      config != null &&
+      (_providerSetupRequested ||
+          (!config!.providerManaged &&
+              (!config!.apiKeyConfigured ||
+                  (config!.personaBootstrapPending && !config!.providerVerified))));
   bool get needsPersonaBootstrap =>
       config != null && config!.personaBootstrapPending;
 
@@ -635,6 +656,8 @@ class AppController extends ChangeNotifier {
     _voiceFirstTextSeen = false;
     voiceTiming('command_send');
     final result = await _protocol.send('send_message', {
+      'requestId':
+          'desktop-${DateTime.now().microsecondsSinceEpoch}-${_sendRequestSequence++}',
       'chatId': chatId,
       'message': text,
       'liveDictation': true,
@@ -1267,6 +1290,7 @@ class AppController extends ChangeNotifier {
     } else {
       await refreshConfig();
     }
+    _providerSetupRequested = false;
     notifyListeners();
     return true;
   }
@@ -1286,7 +1310,11 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
-  Future<bool> submitPersonaBootstrap(String input, {bool skip = false}) async {
+  Future<bool> submitPersonaBootstrap(
+    String input, {
+    bool skip = false,
+    String? name,
+  }) async {
     final chatId = activeChatId;
     if (!_protocol.isConnected || chatId == null) return false;
     setupSaving = true;
@@ -1295,6 +1323,7 @@ class AppController extends ChangeNotifier {
     final result = await _protocol.send('submit_persona_bootstrap', {
       'chatId': chatId,
       'input': input,
+      if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
       if (skip) 'skip': true,
     }, timeout: const Duration(minutes: 5));
     setupSaving = false;
@@ -1581,7 +1610,8 @@ class AppController extends ChangeNotifier {
 
     _syncAssetResolver(chatId: targetChatId);
     unawaited(speechOutput.unlockAudio());
-    if ((liveDictation || dictationSessionActive) && _speechChatId == targetChatId) {
+    if ((liveDictation || dictationSessionActive) &&
+        _speechChatId == targetChatId) {
       speechOutput.flush();
     }
 
@@ -1593,6 +1623,8 @@ class AppController extends ChangeNotifier {
         .applyUserMessage(trimmed, attachmentPreviews: previews);
     _usageTurns.begin(targetChatId);
     final result = await _protocol.send('send_message', {
+      'requestId':
+          'desktop-${DateTime.now().microsecondsSinceEpoch}-${_sendRequestSequence++}',
       'chatId': targetChatId,
       'message': trimmed,
       if (freshContext) 'freshContext': true,

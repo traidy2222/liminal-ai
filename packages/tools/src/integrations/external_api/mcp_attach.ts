@@ -751,7 +751,7 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
   });
   const mcpSearchToolsTool = defineTool({
     name: "mcp_search_tools",
-    description: "Search the complete connected MCP catalog, including REA reverse-engineering tools. Explicit tool names (one or several) rank first; capabilities also work. Loads matching tools for the next round and returns connector-scoped server guidance as UNTRUSTED reference data. Choose the operation for the selected target directly; inspect session/provider state when an observed availability problem requires it. Search again to switch capabilities.",
+    description: "Find built-in tools by name or family/capability, or search the connected MCP catalog, including REA reverse-engineering tools. Explicit tool names (one or several) rank first. Loads matching tools for the next round and returns connector-scoped server guidance as UNTRUSTED reference data. Choose the operation for the selected target directly; inspect session/provider state when an observed availability problem requires it. Search again to switch capabilities.",
     parameters: { type: "object", properties: {
       query: { type: "string", description: "Tool name or capability, e.g. binary_session, decompile, javascript, evidence, Android." },
       connection: { type: "string", description: "Optional connection id, e.g. rea." },
@@ -766,7 +766,27 @@ export function createMcpAttachTools(registry: ToolRegistry, _emitter: AgentEmit
       for (const token of query.match(/[a-z0-9_.:-]+/g) ?? []) {
         if (!explicitNames.has(token)) explicitNames.set(token, explicitNames.size);
       }
+      // Exact native names outrank fuzzy matches in unrelated connectors.
+      // Keep connection-scoped searches in their requested external catalog.
+      if(!args.connection){
+        const native=[...explicitNames.keys()].filter(name=>name.includes('_')&&!name.startsWith('mcp_')).map(name=>registry.get(name)).filter((tool):tool is NonNullable<typeof tool>=>!!tool).slice(0,Math.min(12,Math.max(1,Number(args.limit)||6)));
+        if(native.length){
+          const activated=args.activate!==false?registry.activate(native.map(t=>t.name)):[];
+          return {ok:true,output:JSON.stringify({availableTools:registry.getAll().length,matches:native.map(t=>({name:t.name,connection:'builtin',description:t.description.slice(0,600)})),activated})};
+        }
+      }
       const records = (await listConnections()).filter((c): c is McpConnectionRecord => c.kind === "mcp" && (!args.connection || c.name === args.connection));
+      // A normal browser operation should discover the harness browser before
+      // an unrelated debugging connector. Explicit connector scopes still win.
+      if(!args.connection&&!records.some(record=>explicitNames.has(record.name.toLowerCase()))){
+        const native=registry.getAll().filter(tool=>!tool.name.startsWith('mcp_')&&terms.includes(registry.getSuggestedFamilyForTool(tool.name)?.toLowerCase()??''))
+          .map(tool=>({tool,score:terms.reduce((score,term)=>score+(tool.name.split('_').includes(term)?4:0)+(tool.description.toLowerCase().includes(term)?1:0),0)}))
+          .sort((a,b)=>b.score-a.score||a.tool.name.localeCompare(b.tool.name)).slice(0,Math.min(12,Math.max(1,Number(args.limit)||6))).map(item=>item.tool);
+        if(native.length){
+          const activated=args.activate!==false?registry.activate(native.map(tool=>tool.name)):[];
+          return {ok:true,output:JSON.stringify({availableTools:registry.getAll().length,matches:native.map(tool=>({name:tool.name,connection:'builtin',description:tool.description.slice(0,600)})),activated})};
+        }
+      }
       const matches = records.flatMap(record => record.tools.filter(tool => registry.has(tool.toolName)).map(tool => {
         const nameText = (tool.remoteName + " " + tool.toolName).replace(/_/g, " ").toLowerCase();
         const description = tool.description.toLowerCase();

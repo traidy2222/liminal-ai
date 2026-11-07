@@ -27,11 +27,14 @@ test('message admission reserves the chat before readiness awaits and until send
   let ready!:()=>void,done!:()=>void,sends=0;
   const readiness=new Promise<void>(r=>{ready=r;});const turn=new Promise<void>(r=>{done=r;});
   const {handle}=fixture({chatId:'fixture',isBusy:false,harness:{getIsRunning:()=>false},
-    whenSessionReady:()=>readiness,sendUserMessage:async()=>{sends++;await turn;}});
+    whenSessionReady:()=>readiness,sendUserMessage:async(_message:string,options:{onStart:()=>void})=>{
+      sends++;options.onStart();await turn;
+    }});
   const first=response(),second=response();const a=handle({body:{message:'first'}},first),b=handle({body:{message:'second'}},second);
   try {
     assert.equal(second.statusCode,409,'second request is rejected before session readiness');
     ready();await a;await b;
+    assert.equal(first.statusCode,200);assert.deepEqual(first.body,{ok:true});
     const third=response();await handle({body:{message:'third'}},third);
     assert.equal(third.statusCode,409);assert.equal(sends,1);
   } finally {ready();done();await Promise.allSettled([a,b]);}

@@ -14,22 +14,32 @@ class PersonaBootstrapScreen extends StatefulWidget {
 
 class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
   final _input = TextEditingController();
-  bool _spoken = false;
+  final _name = TextEditingController();
+  bool _spoken = false, _theme = false;
 
   @override
   void dispose() {
     _input.dispose();
+    _name.dispose();
     super.dispose();
   }
 
   Future<void> _submit({bool skip = false}) async {
     final host = AppScope.of(context);
+    if (!skip &&
+        !await host.patchHarnessSettings({
+          'AGENT_PERSONA_UI_THEME_LLM': _theme ? '1' : '0',
+          'AGENT_PERSONA_UI_COPY': _theme ? '1' : '0',
+        }))
+      return;
     if (_spoken && !await host.patchHarnessSettings({'AGENT_TTS_ENABLED': '1'}))
       return;
     if (!mounted) return;
-    await AppScope.of(
-      context,
-    ).submitPersonaBootstrap(skip ? 'skip' : _input.text, skip: skip);
+    await AppScope.of(context).submitPersonaBootstrap(
+      skip ? 'skip' : _input.text,
+      skip: skip,
+      name: _name.text,
+    );
   }
 
   @override
@@ -40,10 +50,22 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
     return LiminalOnboardingPage(
       title: 'Make it your own',
       subtitle:
-          '2 · Choose a writing personality. Describe a name, tone and style, or start immediately with the built-in personality. This is separate from the spoken voice.',
+          '2 · Choose a writing personality. Describe a name, tone and style, or start immediately with the built-in personality. This is separate from the spoken voice. Your model connection is verified; style intensity starts at a moderate level.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          TextField(
+            controller: _name,
+            enabled: !c.setupSaving,
+            maxLength: 80,
+            decoration: const InputDecoration(
+              labelText: 'Name (optional)',
+              hintText: 'Sherlock Holmes',
+              helperText:
+                  'Used exactly as entered. Leave blank to infer it from your description.',
+            ),
+          ),
+          const SizedBox(height: LiminalSpacing.sm),
           TextField(
             controller: _input,
             enabled: !c.setupSaving,
@@ -111,6 +133,11 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
             ),
           ],
           const SizedBox(height: LiminalSpacing.lg),
+          TextButton.icon(
+            onPressed: c.setupSaving ? null : c.requestProviderSetup,
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Change model'),
+          ),
           FilledButton(
             onPressed: c.setupSaving || _input.text.trim().isEmpty
                 ? null
@@ -128,6 +155,17 @@ class _PersonaBootstrapScreenState extends State<PersonaBootstrapScreen> {
               onPressed: () => c.cancelPersonaBootstrap(),
               child: const Text('Cancel generation'),
             ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Match the interface to this personality'),
+            subtitle: const Text(
+              'Optional theme and labels. Adds generation time; leave off to keep the current design.',
+            ),
+            value: _theme,
+            onChanged: c.setupSaving
+                ? null
+                : (value) => setState(() => _theme = value),
+          ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Spoken replies (optional)'),

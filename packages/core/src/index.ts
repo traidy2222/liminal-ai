@@ -850,6 +850,7 @@ export {
   loadRuntimePreferences,
   mergeRuntimePreferences,
   saveRuntimePreferences,
+  patchSavedRuntimePreferences,
 } from "./runtime_prefs.js";
 export type {
   RuntimePreferences,
@@ -1058,6 +1059,7 @@ export {
   resolveNativeVision,
 } from "./native_vision.js";
 export type { NativeVisionResolution } from "./native_vision.js";
+export { modelSupportsNativeVisionAsync } from "./native_vision.js";
 export {
   resolveInputShortcut,
   classifyImplicitFollowUpFeedback,
@@ -1338,7 +1340,7 @@ export {
 } from "./oauth_broker.js";
 export { loadHarnessEnvFiles } from "./load_harness_env.js";
 export {resolveProviderForStartup} from './inference_provider.js';
-export {UNCONFIGURED_PROVIDER_KEY,providerConnectionConfigured,isLocalProviderUrl,normalizeProviderSetup,discoverProviderModels,validateProviderSetup,persistValidatedProvider,type ProviderSetupInput} from './provider_setup.js';
+export {UNCONFIGURED_PROVIDER_KEY,providerConnectionConfigured,providerSetupVerified,ensureProviderSetupVerified,isLocalProviderUrl,normalizeProviderSetup,discoverProviderModels,validateProviderSetup,persistValidatedProvider,type ProviderSetupInput} from './provider_setup.js';
 export { countOAuthAccountFiles, oauthDecryptHint } from "./oauth_diagnostics.js";
 export {
   oauthMailboxQualityScore,
@@ -1660,3 +1662,7 @@ export * from "./procedural_memory/store.js";
 export * from "./procedural_memory/runtime.js";
 export * from "./procedural_memory/workspace.js";
 export * from "./procedural_memory/validation.js";
+export {saveAccount,listSavedAccounts,indexAccountMemory,importAccountMemories,savedAccountContext,accountSafeUrl,type SavedAccount,type AccountStatus,type AccountOwner,type AccountLoginMethod} from './account_directory.js';
+
+export { TaskCompletionLedger } from './task_completion.js';
+export type { OutcomeUpdate } from './task_completion.js';

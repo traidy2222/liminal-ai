@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   type AgentHarness,
+  type RuntimePreferences,
   resolveHarnessEnvRaw,
   providerConnectionConfigured,
   type ChatMetadata,
@@ -63,6 +64,7 @@ export class SessionBridge {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   // send() can still be unwinding after turn_end; background trace is not a new turn.
   private turnEnded = true;
+  private readonly startedToolCalls = new Set<string>();
   private lastTurnSucceeded = false;
   private readonly voiceSessionOwners = new Set<object>();
   get voiceSessionActive(): boolean { return this.voiceSessionOwners.size > 0; }
@@ -128,8 +130,13 @@ export class SessionBridge {
     });
   }
 
-  async submitPersonaBootstrap(input: string, options?: { skip?: boolean }): Promise<void> {
-    if(!providerConnectionConfigured(this.harness.config.openRouterApiKey))throw new Error('Connect and verify a model before setting up your personality.');
+  async synchronizePreferences(prefs:RuntimePreferences):Promise<void>{
+    if(this.isBusy || this.bootstrapInFlight)return;
+    await this.harness.patchRuntimePreferences(prefs,{persist:false});
+    await this.beginSession();
+  }
+
+  async submitPersonaBootstrap(input: string, options?: { skip?: boolean; name?:string }): Promise<void> {
     if (!this.awaitingPersonaBootstrapInput) {
       throw new Error("Persona bootstrap is not pending.");
     }
@@ -148,8 +155,8 @@ export class SessionBridge {
         const skipAllowed = resolveHarnessEnvRaw('AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP',this.harness.getRuntimePreferences()) !== "0";
         if (skipAllowed && (options?.skip || /^(skip|\/skip)$/i.test(trimmed))) {
           this.emitBootstrapProgress("skip", "Installing default Liminal persona…");
-          this.awaitingPersonaBootstrapInput = false;
           await installDefaultPersonaArtifacts(this.harness, { sourcePrompt: "" });
+          this.awaitingPersonaBootstrapInput = false;
           await this.harness.sendSessionGreeting();
           this.emitBootstrapProgress("done", "Session ready.");
           return;
@@ -179,7 +186,7 @@ export class SessionBridge {
               message: msg,
               at: Date.now(),
               artifacts: detail?.artifacts,
-            }),this.bootstrapAbort?.signal
+            }),this.bootstrapAbort?.signal,options?.name
         );
         await applyPersonaProfileToHarness(this.harness, bundle.profile);
         await this.harness.patchRuntimePreferences(
@@ -248,28 +255,35 @@ export class SessionBridge {
 
     // Streaming + lifecycle — forwarded verbatim (already wire-safe).
     on("send_start", () => {
+      this.startedToolCalls.clear();
       this.lastTurnSucceeded = false;
       this.turnEnded = false;
       this.startHeartbeat();
     });
     on("text", (p) => {
+      if(this.turnEnded && p.channel!=="trace")return;
       this.startHeartbeat();
       this.emit("text", p);
     });
     on("provider_retry", (p) => {
+      if(this.turnEnded)return;
       this.startHeartbeat();
       this.emit("provider_retry", p);
     });
     on("tool_start", (p) => {
+      if(this.turnEnded)return;
       this.startHeartbeat();
+      this.startedToolCalls.add(p.callId);
       this.emit("tool_start", p);
     });
     on("speech", (p) => this.emit("speech", p));
     on("browser_view", (p) => this.emit("browser_view", p));
     on("terminal_view", (p) => this.emit("terminal_view", p));
-    on("tool_delta", (p) => this.emit("tool_delta", p));
-    on("compose_preview", (p) => this.emit("compose_preview", p));
-    on("tool_result", (p) => this.emit("tool_result", wireToolResult(p)));
+    on("tool_delta", (p) => {if(!this.turnEnded)this.emit("tool_delta", p);});
+    on("compose_preview", (p) => {if(!this.turnEnded)this.emit("compose_preview", p);});
+    on("tool_result", (p) => {
+      if (this.startedToolCalls.delete(p.callId)) this.emit("tool_result", wireToolResult(p));
+    });
     on("procedure_activity", (p) => this.emit("procedure_activity",p));
     on("turn_summary", (p) => this.emit("turn_summary", p));
     on("turn_end", (p) => {
@@ -299,7 +313,7 @@ export class SessionBridge {
     on("context_snapshot", (p) => this.emit("context_snapshot", p));
     on("tool_timing", (p) => this.emit("tool_timing", p));
     on("tool_progress", (p) => this.emit("tool_progress", p));
-    on("tool_executing", (p) => this.emit("tool_executing", p));
+    on("tool_executing", (p) => {if(!this.turnEnded)this.emit("tool_executing", p);});
     on("persona_changed", (p) => this.emit("persona_changed", p));
     on("execution_state", (p) => this.emit("execution_state", p));
     on("contract_transition", (p) => this.emit("contract_transition", p));
@@ -348,9 +362,19 @@ export class SessionBridge {
   }
 
   /** Start a turn, pinned to this chat's workspace so file/git/repo tools resolve correctly. */
+  private acceptedRequestIds = new Set<string>();
+  hasAcceptedRequest(id?:string):boolean{return !!id&&!!this.acceptedRequestIds?.has(id);}
+  private rememberAcceptedRequest(id?:string):void{
+    if(!id)return;
+    if(typeof id!=='string'||id.length>160)throw Error('Invalid message request ID');
+    this.acceptedRequestIds??=new Set();this.acceptedRequestIds.add(id);
+    if(this.acceptedRequestIds.size>256)this.acceptedRequestIds.delete(this.acceptedRequestIds.values().next().value!);
+  }
+
   async sendUserMessage(
     message: string,
     opts?: {
+      requestId?:string;
       freshContext?: boolean;
       liveDictation?: boolean;
       chatAttachments?: import("@liminal/core").ChatFileAttachment[];
@@ -359,10 +383,12 @@ export class SessionBridge {
       workflowPreset?: import("@liminal/core").SignatureWorkflowPreset;
     }
   ): Promise<void> {
+    if(this.hasAcceptedRequest(opts?.requestId))return;
     if (this.awaitingPersonaBootstrapInput) {
       throw new Error("Complete persona setup before chatting.");
     }
     if (this.isBusy) throw new Error("Agent is busy; finish the current turn first.");
+    this.rememberAcceptedRequest(opts?.requestId);
     this.turnInFlight = true;
     this.turnEnded = false;
     try {

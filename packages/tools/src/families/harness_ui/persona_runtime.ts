@@ -1,5 +1,5 @@
 import type { AgentHarness } from "@liminal/core";
-import {runHarnessEffectiveEnvContext} from '@liminal/core';
+import {runHarnessEffectiveEnvContext,ensureProviderSetupVerified} from '@liminal/core';
 import {personaStagingDirectory,personaTransaction,recoverPersonaPromotion,checkPersonaCancellation} from './persona_transaction.js';
 import type { PersonaArtifactId } from "@liminal/core/persona-bootstrap-progress";
 import {
@@ -18,6 +18,8 @@ import {
   buildHarnessCapabilitySummary,
   buildSoulSlicesFromProfile,
   generatePersonaBundle,
+  personaUiThemeUsesLlm,
+  requestedPersonaName,
   generatePersonaSoulArtifacts,
   generatePersonaUiTheme,
   generatePersonaUiCopy,
@@ -140,7 +142,7 @@ export interface PersonaSoulDiskSlices {
  */
 export function parsePersonaInput(input: string): ParsedPersonaInput {
   let text = input.trim();
-  let strength = 8;
+  let strength = 5;
   let modifier: string | undefined;
 
   const butMatch = text.match(/\s+but\s+(.+)$/i);
@@ -320,12 +322,17 @@ export async function generatePersonaFromInput(
   strength: number,
   modifier?: string,
   onProgress?: PersonaProgressFn,
-  signal?:AbortSignal
+  signal?:AbortSignal,
+  name?:string
 ): Promise<PersonaGenerationBundle> {
+  const desiredName=requestedPersonaName(coreInput,name);
+  onProgress?.('verifying_provider','Checking the selected model…');
+  await ensureProviderSetupVerified({baseURL:harness.config.baseURL,model:harness.config.model,apiKey:harness.config.openRouterApiKey},signal);
   const dir=getPersonaArtifactsPaths().dir;
-  return runHarnessEffectiveEnvContext(harness.getRuntimePreferences(),()=>personaTransaction(dir,()=>generatePersonaDraft(harness,coreInput,strength,modifier,onProgress),signal));
+  const currentTheme=await loadPersonaUiThemeFromWorkspace();
+  return runHarnessEffectiveEnvContext(harness.getRuntimePreferences(),()=>personaTransaction(dir,()=>generatePersonaDraft(harness,coreInput,strength,modifier,onProgress,currentTheme,desiredName),signal));
 }
-async function generatePersonaDraft(harness:AgentHarness,coreInput:string,strength:number,modifier?:string,onProgress?:PersonaProgressFn):Promise<PersonaGenerationBundle>{
+async function generatePersonaDraft(harness:AgentHarness,coreInput:string,strength:number,modifier?:string,onProgress?:PersonaProgressFn,currentTheme?:PersonaUiThemeV2|null,explicitName?:string):Promise<PersonaGenerationBundle>{
   const { openRouterApiKey, model, baseURL } = harness.config;
   const capabilitySummary = buildHarnessCapabilitySummary(
     harness.registry.getAll().map((t) => t.name)
@@ -364,7 +371,8 @@ async function generatePersonaDraft(harness:AgentHarness,coreInput:string,streng
     baseURL,
     progress,
     preview,
-    harnessCapabilityHint
+    harnessCapabilityHint,
+    explicitName
   );
   const profile = bundle.profile;
   const scaffold = buildSoulSlicesFromProfile(profile, coreInput);
@@ -379,7 +387,12 @@ async function generatePersonaDraft(harness:AgentHarness,coreInput:string,streng
       progress,
       { scaffold, preview, harnessCapabilityHint }
     ),
-    generatePersonaUiTheme(profile, scaffold, openRouterApiKey, model, baseURL, preview),
+    personaUiThemeUsesLlm() ? generatePersonaUiTheme(profile, scaffold, openRouterApiKey, model, baseURL, preview)
+      : Promise.resolve().then(async()=>{
+          const theme={...(currentTheme??LIMINAL_DEFAULT_UI_THEME),displayLabel:profile.name};
+          if(preview)await preview.completeArtifact('ui_theme',JSON.stringify(theme));
+          return theme;
+        }),
   ]).catch((err: unknown) => {
     console.error("[persona] soul/theme generation failed:", err);
     throw err;
@@ -477,12 +490,10 @@ export async function loadPersonaUiCopyFromWorkspace(): Promise<PersonaUiCopy | 
 
 export async function applyPersonaProfileToHarness(harness: AgentHarness, profile: PersonaProfile): Promise<void> {
   const slices = await loadPersonaArtifactsContext();
-  const soulMd = buildPersonaSoulMarkdownFromSlices(slices);
-  const parts = [buildRichPersonaBlock(profile)];
-  if (soulMd) {
-    parts.push("", "SOUL BLUEPRINT (authoritative identity reference):", soulMd);
-  }
-  const block = parts.join("\n");
+  // The profile is the canonical runtime voice. Soul files remain editable
+  // reference artifacts; repeating their contents creates competing instructions.
+  const block = buildRichPersonaBlock(profile);
+  const notes = slices.living?.replace(DEFAULT_LIVING_HEADER.trim(), '').replace(/^# Persona living notes\s*/, '').trim();
   harness.setPersona(
     {
       name: profile.name,
@@ -490,7 +501,8 @@ export async function applyPersonaProfileToHarness(harness: AgentHarness, profil
       voice: buildPersonaVoiceSummary(profile),
       traits: buildPersonaTraitTags(profile),
     },
-    block
+    block,
+    notes ? `PERSONA LIVING NOTES (subordinate to the current user request):\n${notes.slice(-6000)}` : ""
   );
 }
 

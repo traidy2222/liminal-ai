@@ -110,6 +110,7 @@ class ProtocolClient {
         }
         return;
       case 'chat_list':
+      case 'chat_focus_requested':
       case 'settings':
       case 'vireon_account':
       case 'pong':

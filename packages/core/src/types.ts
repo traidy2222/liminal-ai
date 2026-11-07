@@ -31,6 +31,7 @@ export interface PropertySchema {
 }
 
 export interface ToolParameterSchema {
+  anyOf?: PropertySchema[];
   type: "object";
   properties: Record<string, PropertySchema>;
   required?: string[];
@@ -419,6 +420,7 @@ export type TurnEndTerminationReason = "ok" | "round_cap" | "timeout" | "error" 
 
 /** Emitted on turn_end for orchestration / eval surfaces (arXiv:2512.08296, 2601.06112). */
 export interface TurnEndHarnessMetrics {
+  taskCompletion?: {requested:number;completed:number;pending:number;blocked:number;heldFinalReplies:number};
   /** How the harness finished this send (optional for backward compatibility). */
   terminationReason?: TurnEndTerminationReason;
   /** Distinct tool names invoked at least once during this send(). */
@@ -1125,7 +1127,7 @@ export interface AgentConfig {
   /** Optional loaded runtime preferences used as session defaults/overrides. */
   runtimePreferences?: RuntimePreferences | null;
   /** Optional persistence hook invoked when runtime preferences are changed in-session. */
-  persistRuntimePreferences?: (prefs: RuntimePreferences) => Promise<string | void> | string | void;
+  persistRuntimePreferences?: (prefs: RuntimePreferences, patch?: Partial<RuntimePreferences>) => Promise<string | void> | string | void;
   /** Optional sidecar vision model configuration (Owl remains primary reasoning model). */
   vision?: {
     model?: string;

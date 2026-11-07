@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import {createServer} from "node:http";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,8 +145,8 @@ test("applyPersonaProfileToHarness includes living slice in persona block", asyn
   await writeFile(paths.livingPath, "# Persona living notes\n\nhello-living\n", "utf8");
   let block = "";
   const harness = {
-    setPersona(_cfg: unknown, b: string) {
-      block = b;
+    setPersona(_cfg: unknown, b: string, supplement = "") {
+      block = b + supplement;
     },
   } as unknown as AgentHarness;
   await rt.applyPersonaProfileToHarness(harness, minimalProfile);
@@ -170,8 +171,8 @@ test("append_persona_living tool reloads harness via setPersona", async () => {
   let blocks: string[] = [];
   const harness = {
     getPersistedPersonaProfile: () => undefined,
-    setPersona(_cfg: unknown, b: string) {
-      blocks.push(b);
+    setPersona(_cfg: unknown, b: string, supplement = "") {
+      blocks.push(b + supplement);
     },
   } as unknown as AgentHarness;
 
@@ -182,4 +183,56 @@ test("append_persona_living tool reloads harness via setPersona", async () => {
   assert.ok(blocks.length >= 1);
   assert.match(blocks[blocks.length - 1]!, /new-lesson/);
   await rm(root, { recursive: true, force: true });
+});
+
+
+test('verified first-run generation uses one draft, keeps the theme and writes complete artifacts',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'liminal-persona-flow-'));
+ process.env.AGENT_WORKSPACE_ROOT=root;process.env.AGENT_GLOBAL_STORAGE_ROOT=root;
+ const original=globalThis.fetch;let checks=0,drafts=0;
+ const {generatePersonaFromInput,getPersonaArtifactsPaths}=await import('./persona_runtime.js');
+ const {setPersonaGeneratorTestHooks}=await import('./persona_generator.js');
+ const {LIMINAL_DEFAULT_UI_THEME}=await import('./persona_default.js');
+ try{
+  globalThis.fetch=async()=>{checks++;return new Response(JSON.stringify({choices:[{message:{tool_calls:[{function:{name:'connection_check',arguments:'{"ready":true}'}}]}}]}));};
+  setPersonaGeneratorTestHooks({callPersonaModel:async()=>{drafts++;return {...minimalProfile,neverDo:[],alwaysDo:[],speechStyle:{...minimalProfile.speechStyle,avoidWords:[]}};}});
+  const paths=getPersonaArtifactsPaths();await mkdir(paths.dir,{recursive:true});
+  await writeFile(paths.uiThemePath,JSON.stringify({...LIMINAL_DEFAULT_UI_THEME,accent:'#fca5a5'}));
+  const harness={config:{openRouterApiKey:'synthetic-flow-key',model:'fixture/model',baseURL:'https://fixture.example/v1'},registry:{getAll:()=>[]},
+    getRuntimePreferences:()=>({version:1,updatedAt:0,harness:{env:{AGENT_PERSONA_UI_THEME_LLM:'0',AGENT_PERSONA_UI_COPY:'0',AGENT_PERSONA_SOUL_MODE:'scaffold'}}})} as unknown as AgentHarness;
+  const bundle=await generatePersonaFromInput(harness,'Warm patient botanist named Fern',5);
+  assert.equal(checks,1);assert.equal(drafts,1);assert.deepEqual(bundle.profile.neverDo,[]);
+  assert.equal(JSON.parse(await readFile(paths.uiThemePath,'utf8')).accent,'#fca5a5');
+  for(const file of [paths.runtimeProfilePath,paths.identityPath,paths.voicePath,paths.stancePath,paths.railsPath,paths.manifestPath,paths.uiCopyPath])assert.ok((await readFile(file,'utf8')).length>0);
+  await generatePersonaFromInput(harness,'Warm patient botanist named Fern',5);
+  assert.equal(checks,1,'unchanged verified model needs no additional preflight');assert.equal(drafts,2);
+ }finally{globalThis.fetch=original;setPersonaGeneratorTestHooks(undefined);await rm(root,{recursive:true,force:true});}
+});
+
+
+test('streaming first-run verifies the local model before publishing persona artifacts',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'liminal-persona-stream-'));process.env.AGENT_WORKSPACE_ROOT=root;process.env.AGENT_GLOBAL_STORAGE_ROOT=root;
+ const requests:{stream:boolean;tools:boolean;model:string}[]=[];
+ const profile={...minimalProfile,neverDo:[],alwaysDo:[],speechStyle:{...minimalProfile.speechStyle,avoidWords:[]}};
+ const server=createServer(async(req,res)=>{
+  let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);
+  requests.push({stream:body.stream===true,tools:!!body.tools,model:body.model});
+  if(body.tools){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{tool_calls:[{function:{name:'connection_check',arguments:'{"ready":true}'}}]}}]}));return;}
+  res.writeHead(200,{'Content-Type':'text/event-stream'});
+  const json=JSON.stringify(profile);
+  for(let offset=0;offset<json.length;offset+=180)res.write('data: '+JSON.stringify({choices:[{index:0,delta:{content:json.slice(offset,offset+180)}}]})+'\n\n');
+  res.end('data: '+JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');
+ });await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const address=server.address();assert.ok(address&&typeof address!=='string');
+  const harness={config:{openRouterApiKey:'liminal-local',model:'fixture/local',baseURL:`http://127.0.0.1:${address.port}/v1`},registry:{getAll:()=>[]},
+    getRuntimePreferences:()=>({version:1,updatedAt:0,harness:{env:{AGENT_PERSONA_UI_THEME_LLM:'0',AGENT_PERSONA_UI_COPY:'0',AGENT_PERSONA_SOUL_MODE:'scaffold',AGENT_PERSONA_GENERATION_STREAM:'1'}}})} as unknown as AgentHarness;
+  const {generatePersonaFromInput,getPersonaArtifactsPaths}=await import('./persona_runtime.js');
+  const events:string[]=[];
+  const result=await generatePersonaFromInput(harness,'Patient botanist named Fern',5,undefined,(stage)=>events.push(stage));
+  assert.equal(result.profile.strength,5);
+  assert.deepEqual(requests,[{stream:false,tools:true,model:'fixture/local'},{stream:true,tools:false,model:'fixture/local'}]);
+  const paths=getPersonaArtifactsPaths();assert.equal(JSON.parse(await readFile(paths.runtimeProfilePath,'utf8')).name,'Fern');
+  assert.ok(events.includes('verifying_provider'));assert.ok(events.includes('artifact_ready'));
+ }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await rm(root,{recursive:true,force:true});}
 });

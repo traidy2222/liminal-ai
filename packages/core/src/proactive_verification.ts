@@ -3,7 +3,7 @@
  * so the model sees results before it can claim done (no turn-end gate / re-reply loop).
  */
 
-import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
+import { currentHarnessPreferences, effectiveHarnessEnvRaw, harnessEnvResolutionMeta } from "./harness_effective_env.js";
 
 const VERIFY_TOOL_NAMES = new Set([
   "run_lint",
@@ -24,21 +24,26 @@ const TYPED_CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|cs|vue|svelte)
 const SHELL_VERIFY_RE =
   /\b(npm run (test|typecheck|lint|build|check)|npx tsc|pnpm (test|lint|typecheck|build)|yarn (test|lint|build)|pytest|cargo test|go test|dotnet test|mvn test|gradle test|vitest|jest)\b/i;
 
-/** Master switch — proactive in-flow checks (default on). */
+function explicitVerificationSetting(key: string): string | undefined {
+  const { value, source } = harnessEnvResolutionMeta(key, currentHarnessPreferences());
+  return source === "environment" || source === "harness_preferences" ? value : undefined;
+}
+
+/** Master switch — proactive in-flow checks (default off). */
 export function proactiveVerificationEnabled(): boolean {
-  const proactive = effectiveHarnessEnvRaw("AGENT_PROACTIVE_VERIFY");
+  const proactive = explicitVerificationSetting("AGENT_PROACTIVE_VERIFY");
   if (proactive === "0") return false;
   if (proactive === "1") return true;
   // Legacy turn-end gate key — treat enabled as proactive when new key unset.
-  return effectiveHarnessEnvRaw("AGENT_VERIFY_BEFORE_DONE") !== "0";
+  return effectiveHarnessEnvRaw("AGENT_VERIFY_BEFORE_DONE") === "1";
 }
 
-/** Auto run_lint after typed file edits in a batch (default on). */
+/** Auto run_lint after typed file edits in a batch (default off). */
 export function proactiveLintAfterEditsEnabled(): boolean {
-  const raw = effectiveHarnessEnvRaw("AGENT_PROACTIVE_VERIFY_LINT");
+  const raw = explicitVerificationSetting("AGENT_PROACTIVE_VERIFY_LINT");
   if (raw === "0") return false;
   if (raw === "1") return true;
-  return effectiveHarnessEnvRaw("AGENT_VERIFY_BEFORE_DONE_AUTO_LINT") !== "0";
+  return effectiveHarnessEnvRaw("AGENT_VERIFY_BEFORE_DONE_AUTO_LINT") === "1";
 }
 
 export function toolCallCountsAsVerification(toolName: string, argsJson?: string): boolean {

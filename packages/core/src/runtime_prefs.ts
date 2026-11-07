@@ -1,3 +1,4 @@
+import {applyPersonaControlsToProfile} from "./runtime_persona_controls.js";
 import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path, { join } from "node:path";
@@ -250,3 +251,21 @@ export function mergeRuntimePreferences(
   };
 }
 
+
+
+/** Merge sparse harness changes against current disk state under the file queue. */
+export async function patchSavedRuntimePreferences(patch:Partial<RuntimePreferences>,workspaceRoot?:string):Promise<{preferences:RuntimePreferences;filePath:string}>{
+ await ensureGlobalStorageRoot();
+ const filePath=await pickWritePath(runtimePrefsPaths(workspaceRoot));
+ await mkdir(path.dirname(filePath),{recursive:true});
+ return withPreferenceFile(filePath,async()=>{
+  let current:RuntimePreferences|null=null;
+  try{const parsed=JSON.parse(await readFile(filePath,'utf8'));if(!validPreferences(parsed))throw new Error('Existing runtime preferences are invalid');current=withoutPersistedSecrets(parsed);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+  const preferences=withoutPersistedSecrets(mergeRuntimePreferences(current,patch));
+  if(patch.persona?.controls&&!patch.persona.activeProfile&&preferences.persona?.activeProfile){
+   preferences.persona.activeProfile=applyPersonaControlsToProfile(preferences.persona.activeProfile,patch.persona.controls);
+  }
+  if(!validPreferences(preferences))throw new Error("Invalid runtime preference patch");
+  await writePreferencesFile(filePath,preferences);return {preferences,filePath};
+ });
+}

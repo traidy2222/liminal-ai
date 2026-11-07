@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";
-import { clientFrame, type AnyFrame, type ServerFrame } from "@liminal/protocol";
+import { clientFrame, serverFrame, type AnyFrame, type ServerFrame } from "@liminal/protocol";
 import { WsServer } from "./ws_server.js";
 
 /**
@@ -16,6 +16,46 @@ const DUMMY_PROVIDER = {
   model: "dummy/model",
   baseURL: "https://example.invalid/v1",
 } as const;
+
+test('WsServer: accepted prompts reach watching clients before the reply, without echoing to the sender', async () => {
+  const received = new Map<object, ServerFrame[]>();
+  const socket = () => { const ws = {readyState:WebSocket.OPEN,send:(raw:string)=>received.get(ws)!.push(JSON.parse(raw))}; received.set(ws,[]); return ws; };
+  const origin=socket(),desktop=socket(),viewer=socket(),unrelated=socket();
+  const accepted=new Set<string>(),acks:boolean[]=[],relayed:ServerFrame[]=[];
+  const bridge={isBusy:false,isAwaitingPersonaBootstrap:false,
+    hasAcceptedRequest:(id?:string)=>!!id&&accepted.has(id),
+    sendUserMessage:async(_text:string,options:{requestId?:string})=>{
+      if(options.requestId)accepted.add(options.requestId);
+      server.broadcast(serverFrame('text',{channel:'user',delta:'Starting now.'},'demo'));
+    },
+  };
+  const server=Object.assign(Object.create(WsServer.prototype),{
+    clients:new Set([origin,desktop,viewer,unrelated]),
+    clientMeta:new Map([[origin,{role:'owner'}],[desktop,{role:'owner'}],[viewer,{role:'view',chatId:'demo'}],[unrelated,{role:'view',chatId:'other'}]]),
+    cloudRelay:{forward:(raw:string)=>relayed.push(JSON.parse(raw))},
+    registry:{get:(id:string)=>id==='demo'?bridge:undefined},
+    ack:(_ws:unknown,_id:string,ok:boolean)=>acks.push(ok),
+  }) as any;
+  const send=(id:string,requestId:string,message:string,attachments?:unknown[])=>server.dispatch(origin,clientFrame(id,'send_message',{chatId:'demo',requestId,message,...(attachments?{attachments}: {})} as any));
+  await send('one','request-1','  Build the launch workspace  ');
+  assert.deepEqual(received.get(desktop)!.map(f=>f.event),['user_message','text']);
+  assert.deepEqual(received.get(viewer)!.map(f=>f.event),['user_message','text']);
+  assert.deepEqual(received.get(origin)!.map(f=>f.event),['text']);
+  assert.deepEqual(received.get(unrelated),[]);
+  assert.deepEqual(received.get(desktop)![0],serverFrame('user_message',{text:'Build the launch workspace',requestId:'request-1'},'demo'));
+  await send('retry','request-1','Build the launch workspace');
+  assert.equal(received.get(desktop)!.length,2);
+  bridge.isBusy=true;await send('busy','request-2','Rejected');bridge.isBusy=false;
+  bridge.isAwaitingPersonaBootstrap=true;await send('setup','request-3','Rejected');bridge.isAwaitingPersonaBootstrap=false;
+  await send('invalid','x'.repeat(161),'Rejected');
+  assert.equal(received.get(desktop)!.length,2);
+  assert.deepEqual(acks,[true,true,false,false,false]);
+  await send('file','request-4','',[{name:'brief.txt',mimeType:'text/plain',dataUrl:'data:text/plain;base64,cHJpdmF0ZS1maWxl',sizeBytes:12}]);
+  const file=received.get(desktop)!.filter(f=>f.event==='user_message').at(-1)!;
+  assert.deepEqual(file.data,{text:'',requestId:'request-4',attachmentPreviews:[{name:'brief.txt'}]});
+  assert.doesNotMatch(JSON.stringify(file),/base64|dataUrl|cHJpdmF0ZS1maWxl/);
+  assert.equal(relayed.filter(f=>f.event==='user_message').length,2);
+});
 
 /**
  * Buffers every server frame from socket creation so a `waitFor` can match

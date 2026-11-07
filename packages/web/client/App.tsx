@@ -1566,15 +1566,25 @@ export function App() {
   const [windowWidth,  setWindowWidth]  = useState(window.innerWidth);
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [bootstrapInput, setBootstrapInput] = useState("");
+  const [bootstrapName,setBootstrapName]=useState("");
   const [bootstrapSpoken,setBootstrapSpoken]=useState(false);
+  const [bootstrapTheme,setBootstrapTheme]=useState(false);
   const [providerSetupReady,setProviderSetupReady]=useState(false);
   const [bootstrapSubmitting, setBootstrapSubmitting] = useState(false);
   const [bootstrapError,setBootstrapError]=useState('');
   const startPersonality=async(skip=false)=>{
     if(bootstrapSubmitting)return;setBootstrapSubmitting(true);setBootstrapError('');
     try{
-      if(bootstrapSpoken){const speech=await webApiFetch(WEB_SERVER_BASE+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env:{AGENT_TTS_ENABLED:'1'}}})});if(!speech.ok)throw Error('Could not enable spoken replies. Retry or leave speech off for now.');}
-      const result=await sendPersonaBootstrap(skip?'':bootstrapInput.trim(),{skip});
+      const env: Record<string, string> = {};
+      if (!skip && bootstrapTheme) Object.assign(env, {AGENT_PERSONA_UI_THEME_LLM:'1', AGENT_PERSONA_UI_COPY:'1'});
+      if (bootstrapSpoken) env.AGENT_TTS_ENABLED = '1';
+      if (Object.keys(env).length) {
+        const settings = await webApiFetch(WEB_SERVER_BASE+'/api/settings', {
+          method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({harness:{env}}),
+        });
+        if (!settings.ok) throw Error('Could not save personality options. Please retry.');
+      }
+      const result=await sendPersonaBootstrap(skip?'':bootstrapInput.trim(),{skip,name:bootstrapName.trim()||undefined});
       if(result.ok)setBootstrapInput('');else setBootstrapError('Personality setup did not finish. Check the connection, then retry or use the built-in personality.');
     }catch(error){setBootstrapError(error instanceof Error?error.message:'Setup failed. Please retry.');}
     finally{setBootstrapSubmitting(false);}
@@ -2651,6 +2661,7 @@ export function App() {
             >
               Make Liminal your own
             </div>
+            <button type="button" disabled={bootstrapSubmitting} onClick={()=>window.dispatchEvent(new Event('liminal-configure-model'))}>← Change model</button>
             <div style={{ marginBottom: 10, color: "#c8d4e0", lineHeight: 1.65, fontSize: 14 }}>
               Choose the assistant’s <strong style={{ color: "#e8f0ff" }}>writing personality</strong> (name, tone, humor). Tools,
               safety, and task behavior stay the same. You can change this anytime in Settings or with{" "}
@@ -2692,6 +2703,7 @@ export function App() {
                 }
               />
             )}
+            <label style={{display:'block',marginBottom:12}}>Name (optional)<input value={bootstrapName} maxLength={80} disabled={bootstrapSubmitting} placeholder="Sherlock Holmes" onChange={e=>setBootstrapName(e.target.value)} style={{display:'block',width:'100%',padding:10}}/></label>
             <textarea
               ref={bootstrapTextareaRef}
               style={{ ...styles.textarea, minHeight: 110, width: "100%" }}
@@ -2725,6 +2737,7 @@ export function App() {
             </div>
             {bootstrapError&&<p role="alert" style={{color:'#ff9c9c'}}>{bootstrapError}</p>}
             {bootstrapSubmitting&&<button type="button" style={styles.btn} onClick={()=>void webApiFetch(WEB_SERVER_BASE+'/api/persona/cancel',{method:'POST'}).catch(()=>setBootstrapError('Could not cancel. Check your connection and retry.'))}>Cancel generation</button>}
+            <label style={{display:'block',marginTop:16}}><input type="checkbox" disabled={bootstrapSubmitting} checked={bootstrapTheme} onChange={e=>setBootstrapTheme(e.target.checked)}/> Match interface theme and labels (optional; adds generation time)</label>
             <label style={{display:'block',marginTop:16}}><input type="checkbox" disabled={bootstrapSubmitting} checked={bootstrapSpoken} onChange={e=>setBootstrapSpoken(e.target.checked)}/> Spoken replies (optional)</label>
             <p style={{fontSize:12,color:'#a8b7c8'}}>Personality changes writing style. Spoken replies use your separately configured speech voice. Microphone and wake word can be set up later in Settings.</p>
             {state.personaBootstrapAllowSkip && (

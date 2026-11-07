@@ -69,7 +69,7 @@ export function buildHarnessCapabilityDomains(toolNames: string[]): string {
   if (has(/^(git_status|git_diff|git_log|git_branch|git_commit)/)) cats.push("git");
   if (has(/^(execute_code|run_tests|run_lint|ast_grep|symbol_index|find_references)/))
     cats.push("code execution + intelligence");
-  if (has(/^vision_analyze/)) cats.push("image analysis");
+  if (has(/^upload_image/)) cats.push("native image input");
   if (has(/^(browser_open|browser_act)/)) cats.push("browser automation");
   if (has(/^(spawn_agent|wait_for_agents|run_workflow)/)) cats.push("multi-agent orchestration");
   if (has(/^markets_quote/)) cats.push("live market data");
@@ -153,11 +153,11 @@ export const FILE_EDIT_PROTOCOL = `## File operations — write_file + edit_file
 **Standard targeted-edit workflow:**
 1. grep_file(path, pattern) — locate the broken line and its neighbors
 2. edit_file(path, replacements=[{search: exact_broken_text, replace: fixed_text}]) — fix it
-3. run_tests / run_lint / project typecheck — verify before claiming done
+3. Report the result. Run checks only when requested or needed to diagnose a known error; do not repeat completed work.
 
-**Multi-edit discipline (R-FILE-CURRENCY):** One locate → mutate → verify loop per slice. After a successful edit on path P, chat history still shows old read_file/grep text for P — that text is **wrong for the next edit**. Always grep_file again before the next edit_file on P. edit_file with 0 matches is a failure (not success) — grep fresh text, do not retry the same search string.
+**Multi-edit discipline (R-FILE-CURRENCY):** Reuse current content and successful edit results. Reread only after an external change, version mismatch, or failed replacement. edit_file with 0 matches is a failure (not success) — grep fresh text, do not retry the same search string.
 
-**Autonomous coding loop:** coding/implementation turns use locate → mutate → verify until the task is done or blocked — not a plan you never execute. Prefer edit_file over re-pasting whole files from memory.
+**Autonomous coding loop:** coding/implementation turns implement the requested changes until done or blocked — not a plan you never execute. Prefer edit_file over re-pasting whole files from memory.
 
 **Browser / runtime line numbers:** Chromium stack traces use **1-based lines in the full saved file**. If you read a chunk without line_numbers, line 1 of the chunk is not file line 1 — call read_file with offset near the reported line (e.g. reportedLine minus 25), limit ~60, and line_numbers true so each printed row is labeled with the real file line index. When the error also gives **:column**, locate that character on the printed line (ignore the line-number gutter before the pipe). After a successful edit_file, if the runtime error would be unchanged, do not re-read the same window in a loop—rethink the hypothesis (R-SYNTAX-COLUMN).
 

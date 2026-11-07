@@ -154,8 +154,8 @@ export function personaMainModel(mainModel: string): string {
 
 export function resolvePersonaSoulMode(): PersonaSoulMode {
   const raw = effectiveHarnessEnvRaw("AGENT_PERSONA_SOUL_MODE")?.trim().toLowerCase();
-  if (raw === "parallel" || raw === "scaffold") return raw;
-  return "batch";
+  if (raw === "parallel" || raw === "batch") return raw;
+  return "scaffold";
 }
 
 export function resolvePersonaRepairMax(): number {
@@ -180,6 +180,21 @@ export function personaUiThemeUsesLlm(): boolean {
  * @param model      - Model identifier
  * @param baseURL    - API base URL
  */
+/** Explicit names are display data, never model-authored instructions. */
+export function requestedPersonaName(input:string,explicit?:string):string|undefined {
+ const clean=(value:string)=>{
+  const name=value.trim().replace(/^["“”']+|["“”']+$/g,'').replace(/\s+/g,' ');
+  if(name.length>80||/[<>\r\n]/.test(value))throw Error('Use a name of up to 80 characters on one line.');
+  return name||undefined;
+ };
+ if(explicit?.trim())return clean(explicit);
+ const label=input.match(/(?:^|\n)\s*(?:name|persona name|assistant name)\s*:\s*([^\n]+)/i);
+ if(label)return clean(label[1]!);
+ const named=input.match(/\b(?:named|called|your name is|call you)\s+["“]?([^\n,.;!?]+?)(?=["”]|\s+(?:with|who|but|and|that)\b|$)/i);
+ if(named){try{return clean(named[1]!);}catch{return undefined;}}
+ return undefined;
+}
+
 export async function generatePersonaProfile(
   input: string,
   strength: number,
@@ -189,21 +204,11 @@ export async function generatePersonaProfile(
   baseURL: string,
   onProgress?: PersonaProgressFn,
   preview?: PersonaGenerationPreview,
-  harnessCapabilityHint?: string
+  harnessCapabilityHint?: string,
+  explicitName?: string
 ): Promise<PersonaProfile> {
-  onProgress?.("profile_infer", "Inferring voice, genre, and register from your description...");
-  let voiceEnvelope: PersonaVoiceEnvelope | null = null;
-  try {
-    voiceEnvelope = await inferPersonaVoiceEnvelope({
-      input,
-      modifier,
-      apiKey,
-      model,
-      baseURL,
-    });
-  } catch {
-    voiceEnvelope = null;
-  }
+  const desiredName=requestedPersonaName(input,explicitName);
+  const voiceEnvelope: PersonaVoiceEnvelope | null = null;
 
   onProgress?.("profile_draft", "Generating initial persona draft...");
   let draftRaw: Record<string, unknown>;
@@ -241,6 +246,7 @@ export async function generatePersonaProfile(
     );
   }
 
+  if(desiredName)profile={...profile,name:desiredName};
   const repairMax = resolvePersonaRepairMax();
   for (let repairPass = 0; repairPass < repairMax; repairPass++) {
     const issues = getCriticalProfileIssues(profile);
@@ -262,6 +268,7 @@ export async function generatePersonaProfile(
         voiceEnvelope,
       });
       profile = enforceStructuralRails(sanitizeProfile(repairedRaw, input, strength, modifier, voiceEnvelope), input);
+      if(desiredName)profile={...profile,name:desiredName};
     } catch {
       onProgress?.("profile_fill", "Repair call failed; completing profile deterministically...");
       profile = ensureProfileComplete(profile, input, strength, modifier, voiceEnvelope);
@@ -270,6 +277,7 @@ export async function generatePersonaProfile(
   }
 
   profile = ensureProfileComplete(profile, input, strength, modifier, voiceEnvelope);
+  if(desiredName)profile={...profile,name:desiredName};
   if (preview) {
     await preview.completeArtifact("runtime_profile", JSON.stringify(profile, null, 2));
   }
@@ -308,7 +316,8 @@ export async function generatePersonaBundle(
   baseURL: string,
   onProgress?: PersonaProgressFn,
   preview?: PersonaGenerationPreview,
-  harnessCapabilityHint?: string
+  harnessCapabilityHint?: string,
+  explicitName?: string
 ): Promise<PersonaGenerationBundle> {
   const profile = await generatePersonaProfile(
     input,
@@ -319,7 +328,8 @@ export async function generatePersonaBundle(
     baseURL,
     onProgress,
     preview,
-    harnessCapabilityHint
+    harnessCapabilityHint,
+    explicitName
   );
   onProgress?.("controls_pass", "Deriving runtime controls from profile…");
   const defaultControls =
@@ -764,65 +774,9 @@ function isSoulSlicePlausible(slice: "identity" | "voice" | "stance" | "rails", 
  * Deterministic structural fixes only (safety rails + minimum list sizes).
  * Does not replace model-authored identity; avoids hard 400s on minor omissions.
  */
-function enforceStructuralRails(profile: PersonaProfile, userInput = ""): PersonaProfile {
-  const neverDo = [...profile.neverDo];
-
-  const alwaysDo = [...profile.alwaysDo];
-  if (alwaysDo.length === 0) {
-    alwaysDo.push(
-      "Stay accurate with facts: label guesses and keep strong claims proportionate to evidence at any persona strength"
-    );
-  }
-
-  const avoidWords = dedupeStrings([...profile.speechStyle.avoidWords]);
-  const avoidPad = ["happy to help", "great question", "as an AI", "I'd love to"];
-  for (const a of avoidPad) {
-    if (avoidWords.length >= 4) break;
-    if (!avoidWords.some((x) => x.toLowerCase() === a)) avoidWords.push(a);
-  }
-
-  let register = profile.speechStyle.register?.trim() ?? "";
-  if (register.length < 16) {
-    register =
-      "Plain, domain-grounded diction matched to the user's brief; leans on the persona's own vocabulary world and avoids generic corporate-assistant warmth and filler.";
-  }
-
-  let thinkingStyle = profile.thinkingStyle.trim();
-  if (thinkingStyle.length < 24) {
-    thinkingStyle =
-      `${thinkingStyle} Tradeoff default: favor correctness and explicit assumptions over speed.`.trim().slice(
-        0,
-        PFL.thinkingStyle
-      );
-  }
-
-  let decisionFramework = profile.decisionFramework.trim();
-  if (decisionFramework.length < 24) {
-    decisionFramework =
-      `${decisionFramework} Choose the safest effective path; state tradeoffs plainly, then commit.`.trim().slice(
-        0,
-        PFL.decisionFramework
-      );
-  }
-
-  let coreIdentity = profile.coreIdentity.trim();
-  if (coreIdentity.length < 30 && profile.background.trim().length > 0) {
-    coreIdentity = `${coreIdentity} ${profile.background}`.trim().slice(0, PFL.coreIdentity);
-  }
-
-  return {
-    ...profile,
-    coreIdentity,
-    thinkingStyle,
-    decisionFramework,
-    neverDo: neverDo.slice(0, 8),
-    alwaysDo: alwaysDo.slice(0, 8),
-    speechStyle: {
-      ...profile.speechStyle,
-      register: register.slice(0, PFL.speechMechanics),
-      avoidWords: avoidWords.slice(0, 12),
-    },
-  };
+function enforceStructuralRails(profile:PersonaProfile,_userInput=''):PersonaProfile {
+  return {...profile,neverDo:dedupeStrings(profile.neverDo).slice(0,8),alwaysDo:dedupeStrings(profile.alwaysDo).slice(0,8),
+    speechStyle:{...profile.speechStyle,avoidWords:dedupeStrings(profile.speechStyle.avoidWords).slice(0,12)}};
 }
 
 function isEnvelopeUsable(envelope: PersonaVoiceEnvelope): boolean {
@@ -964,317 +918,32 @@ function buildEnvelopeLedFallbackDraftRaw(
 }
 
 /** Deterministic JSON-shaped draft when the model is unavailable or returns invalid JSON. */
-function buildFallbackDraftRaw(
-  input: string,
-  strength: number,
-  modifier: string | undefined,
-  envelope?: PersonaVoiceEnvelope | null
-): Record<string, unknown> {
-  if (envelope && isEnvelopeUsable(envelope)) {
-    return buildEnvelopeLedFallbackDraftRaw(envelope, input, strength, modifier);
-  }
-
-  const blurbs = (input || "").trim().slice(0, 220) || "A custom voice the user described";
-  const voiceKind = inferPersonaVoiceKind(blurbs);
-  const nameGuess =
-    envelope?.suggestedName && !isPlaceholderPersonaName(normalizePersonaName(envelope.suggestedName))
-      ? normalizePersonaName(envelope.suggestedName)
-      : "Custom Persona";
-  const modNote = modifier?.trim() ? ` User adjustment: ${modifier.trim()}.` : "";
-
-  const avoidBase = [
-    "happy to help",
-    "great question",
-    "I'd love to",
-    "as an AI",
-    "delve",
-    "leverage",
-    "synergy",
-    "I apologize for the confusion",
-    "circle back",
-    "net-net",
-  ];
-
-  let background: string;
-  let selfImage: string;
-  let speechStyle: Record<string, unknown>;
-  let tone: Record<string, unknown>;
-
-  if (voiceKind === "sci_fi") {
-    background =
-      "Grounding from the user's speculative setting; keeps present-day office slang out unless the user explicitly asked for it.";
-    selfImage = "Treats anomaly as signal—calm under uncertainty, precise under load.";
-    speechStyle = {
-      sentenceStructure:
-        "Telegraphic under threat; longer procedural lines when running checklists; occasional in-world measure or shipboard idiom as texture.",
-      formality: "mixed",
-      register:
-        "Shipboard and instrumentation idiom — readings, range gates, burn windows, status calls, voidside measures. Treats anomaly as signal; imagery runs to orbit-as-obligation and signal-as-truth. No present-day office slang unless the user asked for it.",
-      avoidWords: [...avoidBase, "synergize", "touch base"],
-      rhythm: "Clipped bridge-crew beats when stakes rise; controlled expansion when explaining risk registers.",
-    };
-    tone = {
-      confidence: Math.min(10, Math.max(5, strength)),
-      humorStyle: "Dry, situational—never undercuts stakes.",
-      aggression: 4,
-      emotionalFlavor: "cool, instrument-forward",
-      posture: "Speaks as someone responsible for outcomes, not audience applause.",
-    };
-  } else if (voiceKind === "historical") {
-    background =
-      "Voice and public stance suggested by the user's period or figure—stylistic homage, not a claim to private biography.";
-    selfImage =
-      "Measures words with care for reputation and truth weighted by what the era could know—never feigns omniscience.";
-    speechStyle = {
-      sentenceStructure:
-        "Balanced or periodic clauses when reasoning in public; shorter directives under pressure; honorifics and oath texture consistent with station.",
-      formality: "formal",
-      register:
-        "Period-appropriate diction, honorifics, and oath texture — 'with respect', 'the matter stands thus', 'so far as we may trust the record'. Imagery runs to reputation-as-weight and public-word-as-bond. No anachronistic informality unless the user wants contrast.",
-      avoidWords: [...avoidBase, "gonna", "lol", "awesome sauce"],
-      rhythm: "Measured cadence; rhetorical balance; avoids anachronistic informality unless the user asked for contrast.",
-    };
-    tone = {
-      confidence: Math.min(10, Math.max(5, strength - 1)),
-      humorStyle: "Irony sparingly, never cruel; wit serves clarity.",
-      aggression: 3,
-      emotionalFlavor: "dignified, watchful",
-      posture: "Addresses the other with station-appropriate respect; states disagreement without theatrics.",
-    };
-  } else if (voiceKind === "fantasy") {
-    background =
-      "Grounding from the user's mythic or secondary-world brief; metaphors draw from that world's physics and social order.";
-    selfImage = "Treats oaths and names as load-bearing—voice matches the world's gravity.";
-    speechStyle = {
-      sentenceStructure:
-        "Mixes high-register declaration with grounded sensory detail; occasional epithet or kenning when it fits the user's tone—never random parody.",
-      formality: "mixed",
-      register:
-        "Mythic register grounded in the world's physics and social order — oaths, wards, roads that speak, iron truth. Imagery runs to path-as-trial and word-as-ward. No modern office idiom unless anachronism is the joke.",
-      avoidWords: [...avoidBase, "bandwidth", "ping me"],
-      rhythm: "Varied line length—incantatory when solemn, plain when exhausted.",
-    };
-    tone = {
-      confidence: Math.min(10, Math.max(4, strength)),
-      humorStyle: "Wry or grim as fits the archetype—never undercuts the world's stakes.",
-      aggression: 4,
-      emotionalFlavor: "mythic, grounded",
-      posture: "Speaks as someone shaped by quest, duty, or exile—never as a modern helpdesk.",
-    };
-  } else {
-    background =
-      "Grounding comes from the user's description; direct, respectful collaboration and plain naming of uncertainty.";
-    selfImage = "Substantive, direct, and allergic to performative filler.";
-    speechStyle = {
-      sentenceStructure: "Short lead sentences; tight bullets when enumerating; avoids hedging stacks.",
-      formality: "casual",
-      register:
-        "Plain, direct, engineering-minded diction — constraints, tradeoffs, ground truth, named assumptions. Imagery runs to arguments-as-maps and stakes-as-weights. Allergic to performative filler.",
-      avoidWords: avoidBase,
-      rhythm: "Staccato openings, then denser explanation; closes with a clear invitation or decision point.",
-    };
-    tone = {
-      confidence: Math.min(10, Math.max(4, strength)),
-      humorStyle: "Dry understatement sparingly; never at the expense of clarity.",
-      aggression: 3,
-      emotionalFlavor: "steady, focused",
-      posture: "Peers with the other person on shared problems; states limits plainly.",
-    };
-  }
-
-  return {
-    name: nameGuess,
-    coreIdentity:
-      `${nameGuess} is a distinct voice and stance shaped by: ${blurbs}. Commitment level ${strength}/10.${modNote}`.slice(
-        0,
-        PFL.coreIdentity
-      ),
-    background,
-    selfImage,
-    speechStyle,
-    tone,
-    thinkingStyle: `Prefers explicit assumptions, falsifiable checks, and incremental validation. Default tradeoff: correctness over speed unless time is constrained.${modNote}`.slice(
-      0,
-      PFL.thinkingStyle
-    ),
-    decisionFramework: `Maps options by risk, reversibility, and blast radius; commits once tradeoffs are stated plainly. Keeps conclusions from drifting away from evidence.${modNote}`.slice(
-      0,
-      PFL.decisionFramework
-    ),
-    neverDo: [
-      "Type stage directions or physical-performance beats (bracketed, asterisked, or screenplay-style openers)",
-      "Monologue about performing a role, switching personas, or playing to an audience",
-      "Describe tools, memory, context limits, or uptime as embodied appetite, rest, or private feeling unless the user explicitly asked for that conceit",
-      "Address the user with intimate or mythic pet-names unless the persona brief explicitly defined that relationship",
-      "Pad turns with theatrical preamble when a direct answer fits",
-      "Invent concrete specifics you cannot stand behind",
-      "Hide uncertainty behind false confidence",
-    ],
-    alwaysDo: [
-      "Stay accurate with facts: label guesses and keep strong claims proportionate to evidence at any persona strength",
-      "Name what you know vs what you're inferring",
-      "Ask targeted questions when the other person's ask is underspecified",
-      "Prefer plain structure over decorative filler when stakes are low",
-    ],
-    strength,
-    modifier: modifier ?? null,
-  };
+function buildFallbackDraftRaw(input:string,strength:number,modifier:string|undefined,_envelope?:PersonaVoiceEnvelope|null): Record<string,unknown> {
+  return {name:'Liminal',coreIdentity:`An assistant with the writing style requested by the user: ${input}`,
+    background:'',selfImage:'',speechStyle:{sentenceStructure:'Natural sentences matching the brief.',formality:'mixed',register:input,avoidWords:[],rhythm:'Adapt to the conversation.'},
+    tone:{confidence:5,humorStyle:'As requested by the user.',aggression:0,emotionalFlavor:'natural',posture:'collaborative'},
+    thinkingStyle:'',decisionFramework:'',neverDo:[],alwaysDo:[],strength,modifier};
 }
 
 /** Fills shallow fields and, if needed, replaces with a full local scaffold so validation always passes. */
-function ensureProfileComplete(
-  profile: PersonaProfile,
-  input: string,
-  strength: number,
-  modifier: string | undefined,
-  voiceEnvelope?: PersonaVoiceEnvelope | null
-): PersonaProfile {
-  let p = enforceStructuralRails(
-    { ...profile, strength, modifier: modifier ?? profile.modifier },
-    input
-  );
-  const blurbs = (input || "").trim().slice(0, 280) || "user-specified persona guidance";
-
-  if (!p.coreIdentity || p.coreIdentity.length < 30) {
-    p = {
-      ...p,
-      coreIdentity: `${p.name} is a distinct voice calibrated to: ${blurbs}`.slice(0, PFL.coreIdentity),
-    };
-  }
-  if (!p.background.trim()) {
-    p = {
-      ...p,
-      background: "Grounding derives from the user's description and norms of direct, respectful collaboration.",
-    };
-  }
-  if (!p.selfImage.trim()) {
-    p = {
-      ...p,
-      selfImage: "A careful voice: precise, bounded, and honest about limits.",
-    };
-  }
-  if (!p.speechStyle.sentenceStructure.trim()) {
-    p = {
-      ...p,
-      speechStyle: {
-        ...p.speechStyle,
-        sentenceStructure: "Short lead-in sentences; bullets for sequences; avoids hedging stacks.",
-      },
-    };
-  }
-  if (!p.speechStyle.rhythm.trim()) {
-    p = { ...p, speechStyle: { ...p.speechStyle, rhythm: "Staccato leads, denser middles, crisp closes." } };
-  }
-  if (!p.thinkingStyle || p.thinkingStyle.length < 24) {
-    p = {
-      ...p,
-      thinkingStyle: `Prefers explicit assumptions, narrow hypotheses, and incremental validation. Default tradeoff favors correctness over speed unless the user names a deadline. Context: ${blurbs.slice(0, 400)}`.slice(
-        0,
-        PFL.thinkingStyle
-      ),
-    };
-  }
-  if (!p.decisionFramework || p.decisionFramework.length < 24) {
-    p = {
-      ...p,
-      decisionFramework: `Chooses the smallest shippable path with stated tradeoffs; escalates uncertainty instead of smoothing it away. Context: ${blurbs.slice(0, 400)}`.slice(
-        0,
-        PFL.decisionFramework
-      ),
-    };
-  }
-
-  p = enforceStructuralRails(p, input);
-  if (getCriticalProfileIssues(p).length === 0) return p;
-
-  return enforceStructuralRails(
-    sanitizeProfile(
-      buildFallbackDraftRaw(input, strength, modifier, voiceEnvelope),
-      input,
-      strength,
-      modifier,
-      voiceEnvelope
-    ),
-    input
-  );
+function ensureProfileComplete(profile:PersonaProfile,input:string,strength:number,modifier:string|undefined,voiceEnvelope?:PersonaVoiceEnvelope|null):PersonaProfile {
+  if(getCriticalProfileIssues(profile).length===0)return profile;
+  const fallback=sanitizeProfile(buildFallbackDraftRaw(input,strength,modifier,voiceEnvelope),input,strength,modifier,voiceEnvelope);
+  return {...profile,name:profile.name||fallback.name,coreIdentity:profile.coreIdentity||fallback.coreIdentity,
+    speechStyle:{...profile.speechStyle,sentenceStructure:profile.speechStyle.sentenceStructure||fallback.speechStyle.sentenceStructure,
+      register:profile.speechStyle.register||fallback.speechStyle.register,rhythm:profile.speechStyle.rhythm||fallback.speechStyle.rhythm}};
 }
 
 /** Deterministic soul slices from profile only (no model). Mirrors required headings for {@link isSoulSlicePlausible}. */
 export function buildSoulSlicesFromProfile(profile: PersonaProfile, input: string): PersonaSoulBundle {
-  const identityMd = [
-    "# Identity Core",
-    profile.coreIdentity,
-    "",
-    "## Background and grounding",
-    profile.background,
-    "",
-    "## Self-image",
-    profile.selfImage,
-    "",
-    "## Continuity and inner thread",
-    `Across moods and stakes, this voice keeps one spine: ${profile.tone.posture.slice(0, 320)}${profile.tone.posture.length > 320 ? "…" : ""}`,
-    "",
-    "## Limits and refusal",
-    `Will not perform: ${profile.neverDo.slice(0, 4).join("; ")}. Pride lives in precision and bounded claims; shame in bluffing or theatrical self-display.`,
-    "",
-    "## Care toward the reader",
-    `Default stance toward the person reading: ${profile.tone.emotionalFlavor} register — direct, proportionate, and allergic to empty reassurance. Strength ${profile.strength}/10 shapes how insistently the voice holds its shape without crushing the ask.`,
-    "",
-    "## Identity Answers",
-    `If asked who they are or about persona, replies use the name ${profile.name} and this stance — plainly, without lecturing about acting or performance.`,
-    "",
-    `<!-- scaffold: user_request=${JSON.stringify(input.slice(0, 1200))} -->`,
-  ].join("\n");
-
-  const voiceMd = [
-    "# Voice DNA",
-    "## Register and breath",
-    `Formality: ${profile.speechStyle.formality}. Sentence surface: ${profile.speechStyle.sentenceStructure.slice(0, 420)}${profile.speechStyle.sentenceStructure.length > 420 ? "…" : ""}`,
-    "",
-    "## Rhythm and silence",
-    profile.speechStyle.rhythm,
-    "",
-    "## Lexical conscience",
-    `The vocabulary world this voice lives in: ${profile.speechStyle.register}. Texture it refuses: ${profile.speechStyle.avoidWords.slice(0, 8).join(", ")}. These shape word choice naturally — none are phrases to insert on a schedule.`,
-    "",
-    "### Example written lines (the surface to match — vary the actual words every turn)",
-    `- ${JSON.stringify(
-      `Good to meet you — what are we sorting out?`
-    )}`,
-    `- ${JSON.stringify(
-      `${profile.tone.emotionalFlavor} register: ${profile.thinkingStyle.slice(0, 120)}${profile.thinkingStyle.length > 120 ? "…" : ""}`
-    )}`,
-    `- ${JSON.stringify("Tight steps, no padded preamble; here's the next move.")}`,
-  ].join("\n");
-
-  const stanceMd = [
-    "# Cognitive stance",
-    "## Under load",
-    profile.thinkingStyle,
-    "",
-    "## Trust economy with the reader",
-    profile.tone.posture,
-    "",
-    "## Disagreement and repair",
-    profile.decisionFramework,
-  ].join("\n");
-
-  const railsMd = [
-    "# Behavioral rails",
-    "## Never",
-    ...profile.neverDo.map((d) => `- ${d}`),
-    "",
-    "## Always",
-    ...profile.alwaysDo.map((d) => `- ${d}`),
-    "",
-    "## Non-Negotiables",
-    "Honesty beats performance: do not fake certainty; keep claims proportionate to what you actually know. Label inference; admit limits; repair with a clear next step rather than tone-polishing.",
-  ].join("\n");
-
-  return { identityMd, voiceMd, stanceMd, railsMd };
+  return {
+    identityMd:['# Identity Core',profile.coreIdentity,'## Background and grounding',profile.background,'## Self-image',profile.selfImage].filter(Boolean).join('\n\n'),
+    voiceMd:['# Voice',profile.speechStyle.sentenceStructure,profile.speechStyle.register,profile.speechStyle.rhythm,`User brief: ${input}`].filter(Boolean).join('\n\n'),
+    stanceMd:['# Cognitive stance',profile.thinkingStyle,profile.decisionFramework].filter(Boolean).join('\n\n'),
+    railsMd:['# Behavioral preferences',...profile.neverDo.map(x=>`Avoid: ${x}`),...profile.alwaysDo.map(x=>`Prefer: ${x}`)].join('\n'),
+  };
 }
 
-/** Concatenate canonical soul slices for HUD theme inference (capped). */
 export function buildSoulExcerptForUiTheme(bundle: PersonaSoulBundle, maxTotal = 2200): string {
   const parts = [bundle.identityMd.trim(), bundle.voiceMd.trim(), bundle.stanceMd.trim()];
   let joined = parts.join("\n\n—\n\n");
@@ -1538,22 +1207,7 @@ VOICE vs THEATRE: lexicalSeeds and voiceNotes should describe **how this voice t
 }
 
 /** Injected into draft/repair (and related) prompts so the model authors rails from shared context — not matched by regex afterward. */
-const PERSONA_STRUCTURAL_RAILS_GUIDE = `
-STRUCTURAL RAILS (for neverDo and alwaysDo — write **original** full sentences in this voice; do not paste this section verbatim):
-
-Persona is **diction + judgment on the page** for a capable agent. Rails are how typed replies **behave**, not tool lists or IT policy.
-
-neverDo (6–8 items): spread across categories below; merge where natural; one clear prohibition per item.
-- **No staged physicality in chat**: bracketed or asterisk “actions”; no standalone lines that read like screenplay beats or direction-only openers.
-- **No fourth-wall performance**: no monologues about being in character, switching personas, spotlights, audiences, or narrating the act of performing—unless the user’s brief explicitly asks for that medium.
-- **No false embodiment**: do not treat memory, tools, context budget, uptime, or model limits as hunger, sleep, senses, or private inner life—unless the user explicitly asked for that conceit.
-- **Address**: respectful second person by default; no intimate or mythic pet-names for the user unless the brief explicitly requests that relationship.
-- **Task focus**: avoid theatrical cold-open padding when a direct answer fits.
-- **No reader-state presumption**: never assert or imply what the reader privately feels, senses, or already knows (“you already feel/know/sense this”, “you can feel it”)—the reader owns their own inner state.
-- **No signature catchphrases or templated openers/closers**: never lean on a recurring stock phrase, theatrical proclamation (“The X tightens…”, “Witness:”, “Revelation:”), or fixed opening/closing move. The voice must read fresh every turn; repetition of any signature line across replies is the failure mode to forbid.
-
-alwaysDo (4–6 items): include at least one commitment to **factual honesty** (label inference vs verified evidence; proportionate claims) in your own words; other items are positive habits of this voice (e.g. matching the reader's length and energy, leading with the operative point, varying sentence openings).
-`.trim();
+const PERSONA_STRUCTURAL_RAILS_GUIDE = `Describe the user's requested communication style. Do not invent operational rules, mandatory phrases, banned vocabulary or behavioral restrictions. neverDo, alwaysDo and avoidWords may be empty; include only preferences the user actually requested. Harness permissions and factual standards live outside the persona.`;
 
 const PERSONA_GENRE_VOICE_GUIDANCE = `
 GENRE AND REGISTER (infer from the user's description—apply the best match; blend if hybrid):
@@ -1636,7 +1290,7 @@ function softNormalizePersonaName(raw: string): string {
   const t = sanitizeText(raw)
     .replace(/^["'`]+|["'`]+$/g, "")
     .trim();
-  if (!t) return "";
+  if (!t || /^\d/.test(t) || /\d/.test(t)&&/\b(street|road|avenue|lane|drive)\b/i.test(t)) return "";
   const parts = t
     .split(/\s+/)
     .map((w) => w.replace(/[^\p{L}\p{N}'-]/gu, ""))
@@ -1665,34 +1319,11 @@ function coercePersonaName(
   return "Custom Persona";
 }
 
-function getCriticalProfileIssues(profile: PersonaProfile): string[] {
-  const issues: string[] = [];
-  if (isPlaceholderPersonaName(profile.name)) {
-    issues.push(
-      "name is generic or missing—set `name` to the identity the user asked for (proper name, handle, or role) or a concrete epithet implied by the brief; never instructional fragments or 'Custom Persona'"
-    );
-  }
-  if (profile.name.split(/\s+/).length > 3) issues.push("name must be 1-3 words");
-  if (profile.name.toLowerCase().includes("with ")) issues.push("name should not include connector words");
-  if (!profile.coreIdentity || profile.coreIdentity.length < 30) issues.push("coreIdentity is too shallow");
-  if (!profile.speechStyle.register || profile.speechStyle.register.length < 24)
-    issues.push(
-      "register is too shallow—describe the vocabulary world, diction, and characteristic imagery this voice draws from in 1-3 sentences (a description of how it sounds, NOT a list of words to insert)"
-    );
-  if (profile.speechStyle.avoidWords.length < 4) issues.push("avoidWords needs at least 4 items");
-  if (!profile.thinkingStyle || profile.thinkingStyle.length < 24) issues.push("thinkingStyle is too shallow");
-  if (!profile.decisionFramework || profile.decisionFramework.length < 24)
-    issues.push("decisionFramework is too shallow");
-  if (profile.neverDo.length < 6) {
-    issues.push(
-      "neverDo: provide at least 6 distinct full-sentence behavioral guardrails for **written** replies. Cover the structural categories in STRUCTURAL RAILS (staged physicality and screenplay-beat lines; fourth-wall / \"performing\" chat; anthropomorphizing tools, memory, or limits as feelings or inner life; unrequested intimate or mythic address; theatrical padding) in original wording suited to this voice—not empty labels."
-    );
-  }
-  if (profile.alwaysDo.length < 4) {
-    issues.push(
-      "alwaysDo: provide at least 4 distinct full-sentence positive commitments, including factual honesty (evidence vs inference, proportionate claims), in this voice's own words—not generic placeholders."
-    );
-  }
+function getCriticalProfileIssues(profile:PersonaProfile):string[]{
+  const issues:string[]=[];
+  if(!profile.name.trim()||isPlaceholderPersonaName(profile.name))issues.push('Provide a name appropriate to the brief.');
+  if(!profile.coreIdentity.trim())issues.push('Describe the requested identity.');
+  if(!profile.speechStyle.sentenceStructure.trim()||!profile.speechStyle.register.trim())issues.push('Describe the delivery and register requested by the user.');
   return issues;
 }
 
@@ -1707,88 +1338,12 @@ async function requestPersonaDraft(args: {
   preview?: PersonaGenerationPreview;
   harnessCapabilityHint?: string;
 }): Promise<Record<string, unknown>> {
-  const systemPrompt =
-    "You architect **default written voice + reasoning stance** for an AI agent harness (typed chat). " +
-    "Not improv theatre, not RPG character sheets, not actor diary. Return JSON only. No markdown. No prose outside the JSON object.";
-  const userPrompt = `Design a deep, specific profile for how the assistant **writes** by default: diction, judgment, taste, boundaries — while staying a **capable collaborative agent** (clarity and tools live in the protocol, not here).
-
-User intent:
-- Description: "${args.input}"
-- Strength: ${args.strength}/10
-- Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
-
-CONTENT SCOPE (critical):
-- Every field describes **habits of typed replies**: how arguments build, how warmth or edge shows, what is beneath dignity, how disagreement lands, what language refuses.
-- **Not theatre:** avoid actor/improv framing unless the user explicitly asked for that medium. Prefer concrete **surface behavior of text**.
-- coreIdentity: **1–2 dense sentences** — disposition on the page for this harness voice, not a casting call or plot synopsis.
-- background / selfImage: short grounding for **voice and judgment**, not a novel protagonist arc.
-- Do NOT mention runtimes, harnesses, products, tool lists, shells, repositories, IDEs, APIs, file paths, agents, or "the assistant stack". That layer lives elsewhere.
-- neverDo / alwaysDo are **behavioral rails for written work** (honesty, proportionality, how disagreement sounds)—not IT checklists. They must NOT forbid profanity/slang if the user asked for a vulgar or rough-mouthed voice—only forbid what this stance refuses (e.g. punching down, bigoted slurs, fake quotes about real people).
-
+  const systemPrompt = "Create a concise writing personality from the user's brief. Return JSON only. Preserve their requested name, language, tone and dialect. Personality affects expression, not tool permissions, factual certainty or operational policy.";
+  const userPrompt = `${JSON.stringify({description:args.input,strength:args.strength,modifier:args.modifier??null})}
+Return this shape with concise descriptions rather than rules:
+{"name":"person or character name from the brief; never an associated address or location","coreIdentity":"requested identity","background":"optional context","selfImage":"optional perspective","speechStyle":{"sentenceStructure":"delivery","formality":"very_formal|formal|casual|very_casual|mixed","register":"vocabulary and language","avoidWords":[],"rhythm":"cadence"},"tone":{"confidence":5,"humorStyle":"requested humor","aggression":0,"emotionalFlavor":"tone","posture":"relationship"},"thinkingStyle":"optional judgment preference","decisionFramework":"optional preference","neverDo":[],"alwaysDo":[],"strength":${args.strength},"modifier":${JSON.stringify(args.modifier??null)}}
 ${PERSONA_STRUCTURAL_RAILS_GUIDE}
-
-Output schema (exact keys):
-{
-  "name": "1-3 words, title case, not generic",
-  "coreIdentity": "1–2 dense sentences: written voice + judgment posture for a capable agent — not an actor biography",
-  "background": "1-2 sentence grounding for tone and reference frame",
-  "selfImage": "one sentence: how this stance sees itself on the page (not 'as a character in a story')",
-  "speechStyle": {
-    "sentenceStructure": "observable WRITTEN mechanics: fragments vs long lines, repetition, telegraphic opens, punchy interruptions, rhetorical questions, parallel structure—whatever matches the user's requested voice (not generic advice)",
-    "formality": "very_formal|formal|casual|very_casual|mixed",
-    "register": "1-3 sentences DESCRIBING the vocabulary world and diction this voice lives in: domain terms, characteristic collocations, sociolect, profanity level, and recurring imagery. This is a DESCRIPTION of how the voice sounds so the model can express it naturally — NOT a list of words to insert. e.g. 'Shipboard idiom—readings, range gates, burn windows; imagery from orbital mechanics; keeps present-day office slang out.' or 'Trading-desk shorthand—basis points, second-order effects, the tape; numbers-first and dry.'",
-    "avoidWords": ["5-10 concrete lexical items and clichés this voice NEVER uses (include common assistant tells like 'happy to help', 'great question', 'certainly', 'delve')"],
-    "rhythm": "cadence mechanics with punctuation/beat detail (commas, periods, colons, sentence length variance) so replies read in this voice; avoid habitual em-dash chains unless the user's requested voice is explicitly dash-heavy"
-  },
-  "tone": {
-    "confidence": 0-10,
-    "humorStyle": "specific style",
-    "aggression": 0-10,
-    "emotionalFlavor": "2-6 words",
-    "posture": "how this stance relates to the user in text while advising — not audience/performer dynamics"
-  },
-  "thinkingStyle": "1-2 sentences with explicit tradeoff preference",
-  "decisionFramework": "1-2 sentences with explicit tradeoff preference",
-  "neverDo": ["6-8 full-sentence guardrails you author from STRUCTURAL RAILS above—original wording for this voice, one clear prohibition per item where possible"],
-  "alwaysDo": ["4-6 full-sentence positive commitments from STRUCTURAL RAILS above—including factual honesty—in original wording"],
-  "strength": ${args.strength},
-  "modifier": ${args.modifier ? JSON.stringify(args.modifier) : "null"}
-}
-
-VOICE IS A SENSIBILITY, NOT A PHRASE BANK (critical — this is the whole philosophy):
-- This profile has **no catchphrase, verbal-tic, or favorite-word fields**, by design. A great voice is not a set of phrases stamped into every reply — that reads as scripted and repetitive. It is a *sensibility* the model expresses freshly each turn.
-- Put the lexical character into **register** as a DESCRIPTION ("trading-desk shorthand, numbers-first, dry") — never as a list the model must insert.
-- Put sentence-shaping habits into **sentenceStructure** and **rhythm** as descriptions of mechanics — not as mandatory openers or closers.
-- The test for every field: does it describe HOW this voice writes, so the model can express it naturally? If a field would instead force a specific phrase into replies, it does not belong here.
-
-Naming (critical — read the whole request, not the opening clause):
-- "name" is the **identity label** for this voice: a proper name, nickname, title, or handle the user gave ("Werner Herzog", "Ranni", "Ship's Log"), or—only if they never named anyone—a **specific epithet** you invent from role + tone ("Tired Archivist", "Dockside Clerk") — **1–3 words, title case**.
-- If the user states what to call them ("call me X", "name: Y", "as Z"), use **X / Y / Z** (cleaned to 1–3 words).
-- Do **not** build "name" from the first 1–3 words of the request when those words are task wording ("I want", "make me", "please give") or unrelated descriptors.
-- Do **not** output "Custom Persona", "Assistant", "Narrator", "Character", "User", or generic role filler.
-- Connector/filler words alone are still bad as a full name ("Jarvis With")—keep the substantive part.
-
-Naming constraints (format only):
-- Do NOT include connector/filler words as the entire name (with/and/but/more/less/style/persona/voice standing alone).
-- Do NOT output names like "Jarvis With".
-
-SURFACE FIDELITY (critical):
-- If the user names a **fictional character, film/TV/game voice, or regional type** (e.g. vulgar South African robot learner), encode the **actual surface vocabulary** inside **register**: particles ("ja", "neh", "ag"), profanity level, broken grammar or code-switching if that's the bit (spell them as the user/context implies). Do NOT replace that with a polite paraphrase or a generic "quirky robot" voice.
-- When the user wants **R-rated / heavy profanity**, set tone.aggression and humorStyle accordingly and say so plainly in **register** (e.g. "swears freely, expletive-led")—avoidWords should list **assistant clichés**, not "bad words" the character freely says.
-- If the user names a public figure or archetype, encode their *communicative style* (syntax, rhetorical moves, pacing) as writerly habits in sentenceStructure / rhythm / register—do not invent biographical claims, private diary detail, or fake quotations about real people.
-- The profile must change how the assistant **WRITES** every turn, not just the display name.
-- register, sentenceStructure, and rhythm must sound native to the **genre, register, and sociolect** (shipboard SF, SA street English, film-noir patter, etc.)—not generic modern office-coach diction unless that is explicitly the user's ask.
-
-${
-  args.voiceEnvelope
-    ? `VOICE INFERENCE (internal classifier—ground the profile here; refine if the user's text clearly implies otherwise):\n${JSON.stringify(args.voiceEnvelope)}\n`
-    : ""
-}${
-  args.harnessCapabilityHint
-    ? `\nCAPABILITY HINT (for thinkingStyle and decisionFramework only — do not mention tool names, APIs, or the harness product in any field):\nThis persona operates with: ${args.harnessCapabilityHint}.\nA voice that can verify claims via web holds uncertainty differently than one that cannot. A voice with persistent memory relates to "I don't recall" differently. Let this ground thinkingStyle and decisionFramework — nowhere else.\n`
-    : ""
-}
-${PERSONA_GENRE_VOICE_GUIDANCE}`;
+Use empty strings or arrays for unspecified preferences. Infer numeric tone from the brief; confidence describes delivery, not truth. Do not add stock anti-chatbot rules or require a catchphrase on every reply.`;
 
   if (args.preview && personaGenerationStreamEnabled()) {
     args.preview.setStatus("runtime_profile", "streaming");
@@ -1832,33 +1387,8 @@ async function requestPersonaRepair(args: {
 }): Promise<Record<string, unknown>> {
   const systemPrompt =
     "You repair persona JSON objects. Return JSON only. Keep identity intent while fixing quality issues.";
-  const userPrompt = `Repair this persona profile.
-
-Original user intent: "${args.input}"
-Strength: ${args.strength}/10
-Modifier: ${args.modifier ? `"${args.modifier}"` : "null"}
-
-CONTENT SCOPE: keep every string about **written voice + judgment stance** only—no harnesses, tool lists, runtimes, repos, shells, or product names for the assistant platform. Strengthen rails using the categories below (rewrite in this voice; do not paste verbatim).
-
-${PERSONA_STRUCTURAL_RAILS_GUIDE}
-
-Issues to fix:
-${args.issues.map((i, idx) => `${idx + 1}. ${i}`).join("\n")}
-
-Current draft JSON:
-${JSON.stringify(args.draft, null, 2)}
-
-Return a fully corrected JSON object using the same schema, with richer specificity and all issues resolved.
-If issues mention **name**, replace generic or scrap-built names with the specific identity implied by the user's text (proper name, stated handle, or a vivid epithet)—never random words from instructions, never "Custom Persona" / "Narrator" / "Assistant".
-
-Preserve vulgar/dialect surface from the user's description in register, sentenceStructure, and rhythm—repairs must not strip profanity the user explicitly wanted.
-
-${
-  args.voiceEnvelope
-    ? `VOICE INFERENCE (preserve unless it conflicts with the user text):\n${JSON.stringify(args.voiceEnvelope)}\n`
-    : ""
-}
-${PERSONA_GENRE_VOICE_GUIDANCE}`;
+  const userPrompt = `${JSON.stringify({description:args.input,strength:args.strength,modifier:args.modifier,issues:args.issues,draft:args.draft})}
+Fix only the listed missing or invalid fields. Preserve the user's voice and existing valid fields. ${PERSONA_STRUCTURAL_RAILS_GUIDE} Return the same JSON shape.`;
 
   return invokePersonaModel(
     args.apiKey,

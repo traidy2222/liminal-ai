@@ -58,6 +58,7 @@ export function parseSessionJsonlForReplay(
     ReplayTranscriptEntry
   >();
 
+  let turnClosed = false;
   const lines = raw.split("\n");
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -68,6 +69,13 @@ export function parseSessionJsonlForReplay(
       continue;
     }
     const event = row.event ?? "";
+    if(event==='send_start')turnClosed=false;
+    if(event==='turn_end'){
+      turnClosed=true;
+      for(const entry of pendingTools.values())Object.assign(entry,{toolOk:false,toolOutput:'Tool result was not recorded before the turn ended.',text:'Tool result was not recorded before the turn ended.'});
+      pendingTools.clear();continue;
+    }
+    if(turnClosed&&['text_rollup','text_rollup_partial','tool_start','tool_result'].includes(event))continue;
     if (out.length >= maxEntries && event !== "tool_result") continue;
     const turnIndex = typeof row.turnIndex === "number" ? row.turnIndex : 0;
 

@@ -245,7 +245,7 @@ class BrowserWorkspace extends ChangeNotifier {
             );
             final platform =
                 controller.platform as WindowsPlatformWebViewController;
-            await platform.controller.setVisibility(false);
+            await platform.controller.enableBackgroundRendering();
             return controller;
           } catch (_) {
             await disposeDesktopWebView(controller);

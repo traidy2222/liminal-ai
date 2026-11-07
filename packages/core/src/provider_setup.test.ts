@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';
-import {discoverProviderModels,validateProviderSetup,persistValidatedProvider,normalizeProviderSetup,isLocalProviderUrl,providerConnectionConfigured,UNCONFIGURED_PROVIDER_KEY} from './provider_setup.js';
+import {discoverProviderModels,validateProviderSetup,persistValidatedProvider,normalizeProviderSetup,isLocalProviderUrl,providerConnectionConfigured,UNCONFIGURED_PROVIDER_KEY,providerSetupVerified,ensureProviderSetupVerified} from './provider_setup.js';
 import {runHarnessEffectiveEnvContext} from './harness_effective_env.js';
 import {getFastModelSlug} from './router.js';
 import {resolveProviderConfig} from './provider_config.js';
@@ -81,4 +81,22 @@ test('cloud setup saves only verified credentials outside runtime preferences',a
   const prefs=await persistValidatedProvider(await validateProviderSetup({baseURL:'https://openrouter.ai/api/v1',apiKey:'synthetic-cloud',model:'cloud/tools'}));
   assert.equal(prefs.provider?.inferenceMode,'byok');assert.ok(!JSON.stringify(prefs).includes('synthetic-cloud'));assert.match(await readFile(path.join(root,'.env'),'utf8'),/OPENROUTER_API_KEY="synthetic-cloud"/);
  }finally{globalThis.fetch=original;process.env=before;await rm(root,{recursive:true,force:true});}
+});
+
+
+test('verification is cached only for the exact endpoint, key and model',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'liminal-verification-'));const before={...process.env},original=globalThis.fetch;let calls=0;
+ try{
+  process.env.AGENT_GLOBAL_STORAGE_ROOT=root;
+  const input={baseURL:'https://fixture.example/v1',apiKey:'synthetic-private-key',model:'fixture/model'};
+  globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({choices:[{message:{tool_calls:[{function:{name:'connection_check',arguments:'{"ready":true}'}}]}}]}));};
+  assert.equal(await providerSetupVerified(input),false);
+  await ensureProviderSetupVerified(input);await ensureProviderSetupVerified(input);
+  assert.equal(calls,1);assert.equal(await providerSetupVerified(input),true);
+  for(const changed of [{...input,model:'other'},{...input,apiKey:'other-key'},{...input,baseURL:'https://other.example/v1'}])assert.equal(await providerSetupVerified(changed),false);
+  assert.ok(!(await readFile(path.join(root,'provider_verification.json'),'utf8')).includes(input.apiKey));
+  globalThis.fetch=async()=>new Response('{}',{status:401});
+  const invalid={...input,apiKey:'invalid'};
+  await assert.rejects(ensureProviderSetupVerified(invalid),/credentials/);assert.equal(await providerSetupVerified(invalid),false);
+ }finally{process.env=before;globalThis.fetch=original;await rm(root,{recursive:true,force:true});}
 });

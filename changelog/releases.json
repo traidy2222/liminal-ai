@@ -1,7 +1,39 @@
 {
   "stage": "beta",
-  "currentVersion": "0.1.27",
+  "currentVersion": "0.1.28",
   "releases": [
+    {
+      "version": "0.1.28",
+      "date": "2026-11-07",
+      "tagline": "Browser work that keeps its context and knows what is finished.",
+      "summary": "Improve desktop and web setup, persona generation, native visual browsing, account and credential continuity, completion tracking, and short streamed narration. Repair the concrete control, extraction and conversation failures found during live browser work.",
+      "bullets": [
+        "**Clear completion and conversation boundaries** — Track requested outcomes against observed results, keep unfinished work visible, prevent late events from reviving finished turns, and separate useful narration from tool groups without empty assistant bubbles.",
+        "**Native browser images** — Send masked viewport images directly to compatible main models, preserve the correct tab and image ordering after failed actions, and remove stale images when fresh capture fails. Separate vision-sidecar analysis is no longer part of the browser flow.",
+        "**More reliable browser controls** — Improve embedded-frame feedback, native labels, covered controls, nested scrolling, drag and hold gestures, stable references, and safe wait arguments. Disabled or fully covered targets fail promptly with useful current state.",
+        "**Readable evidence and copied links** — Preserve words split across editor spans, match multi-word queries within relevant passages and table rows, retain dated source evidence, and return links written by a page’s copy action, including Markdown and temporary-field copying. The existing system clipboard is not read.",
+        "**Accounts that survive new chats** — Share account metadata and encrypted credential references across conversations. Distinguish a stored generated password from one actually filled, preserve unknown authentication methods, and allow a signed-in account to be recorded before its future login method is established.",
+        "**Accurate verification state** — Detect supported visible verification widgets, show configured solver availability without submitting a paid task, and distinguish solution application, form submission and actual site acceptance. An unavailable callback or response field no longer reports a successful application.",
+        "**Simpler first run and persona generation** — Verify cloud or local model access before persona generation, validate persona names and generated data, preserve the active persona on interrupted generation, and stop repeated bootstrap requests in established chats.",
+        "**Responsive desktop presentation** — Improve background WebView rendering and resource ownership, chat focus and prompt display during real runs, automatic following of active output, and chronological message replay.",
+        "**Review hardening** — Keep revealed login fields private, isolate preference refresh failures, preserve managed setup, and make concurrent web retries share the original admission result.",
+        "**Shorter spoken segments** — Bound long narration sentences and tool-boundary speech flushes into manageable clips, preserving text order and natural word boundaries while tools continue."
+      ],
+      "docs": [
+        {
+          "label": "Browser automation",
+          "href": "../guides/browser-automation.md"
+        },
+        {
+          "label": "Persona system",
+          "href": "../concepts/persona-system.md"
+        },
+        {
+          "label": "Voice and wake listening",
+          "href": "../guides/voice.md"
+        }
+      ]
+    },
     {
       "version": "0.1.27",
       "date": "2026-11-06",

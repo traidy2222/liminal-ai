@@ -24,6 +24,15 @@ ChatTranscriptState reduceChatEvent(
   Map<String, dynamic> data,
 ) {
   switch (event) {
+    case 'user_message':
+      final text = data['text'] as String? ?? '';
+      final previews = [
+        for (final raw in (data['attachmentPreviews'] as List? ?? const []))
+          if (raw is Map && raw['name'] is String)
+            UserAttachmentPreview(name: raw['name'] as String),
+      ];
+      if (text.isEmpty && previews.isEmpty) return state;
+      return applyUserMessage(state, text, attachmentPreviews: previews);
     case 'procedure_activity':
       final activity = ProcedureActivity.fromJson(data);
       final activities = [

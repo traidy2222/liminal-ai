@@ -8,8 +8,9 @@ import {
   mergeNoteGraphFields,
   type StoredNote,
 } from "./notes_store.js";
-import { rankDocumentsForQuery, effectiveHarnessEnvRaw } from "@liminal/core";
+import { rankDocumentsForQuery, effectiveHarnessEnvRaw,indexAccountMemory } from "@liminal/core";
 import { suggestWikilinkLine } from "./memory_autolink.js";
+import {updateBrowserLoginUsername} from '../browser/browser_credentials.js';
 import { archiveNotes } from "./notes_archive.js";
 
 const MEMORY_TYPES = ["fact", "experience", "entity", "belief", "reflection", "recipe", "hypothesis", "trajectory"] as const;
@@ -81,7 +82,7 @@ export const rememberTool = defineTool({
     required: ["key", "value"],
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args,_emit,harness) => {
     const rawKey = args["key"] as string;
     const value = args["value"] as string;
     if (looksLikePersonaDialSetting(rawKey, value)) {
@@ -103,6 +104,10 @@ export const rememberTool = defineTool({
       scopeArg ? { scope: scopeArg } : undefined
     );
 
+    const stored=(await loadRawNotes())[storageKey];
+    try{const account=indexAccountMemory(storageKey,value,typeof stored==='object'?stored.scope:scopeArg,harness?.taskId);
+      if(harness?.taskId&&account?.credentialId&&account.sourceChat===harness.taskId)updateBrowserLoginUsername(account.credentialId,account.username,account.origin);
+    }catch{/* Account indexing must not invalidate a saved note. */}
     // Graph link inference runs by default (AGENT_MEMORY_GRAPH=0 to disable).
     // This makes related notes discoverable via neighbor expansion in recall_relevant
     // without requiring the full vault graph feature flag.

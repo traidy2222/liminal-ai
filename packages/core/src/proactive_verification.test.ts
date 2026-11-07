@@ -26,7 +26,7 @@ describe("proactive_verification", () => {
     assert.ok(BROWSER_VERIFY_TOOL_NAMES.has("browser_open"));
   });
 
-  it("defaults proactive verification on", () => {
+  it("proactive verification is opt-in", () => {
     assert.equal(typeof proactiveVerificationEnabled(), "boolean");
     assert.equal(typeof proactiveLintAfterEditsEnabled(), "boolean");
   });

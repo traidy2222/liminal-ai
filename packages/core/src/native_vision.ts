@@ -6,11 +6,13 @@ import { readFile } from "node:fs/promises";
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions.js";
 import { effectiveHarnessEnvRaw } from "./harness_effective_env.js";
 import type { ImageAttachment } from "./image_attachments.js";
+import type {Message} from './types.js';
 
 export type NativeVisionResolution = {
   enabled: boolean;
-  source: "slug_list" | "slug_heuristic" | "off";
+  source: "slug_list" | "slug_heuristic" | "catalog" | "off";
 };
+const catalogVision=new Map<string,boolean>();
 
 function slugMatchesList(slug: string, csv: string | undefined): boolean {
   if (!csv?.trim()) return false;
@@ -26,6 +28,7 @@ function slugMatchesList(slug: string, csv: string | undefined): boolean {
 function slugMatchesNativeVisionHeuristic(slug: string): boolean {
   const s = slug.toLowerCase();
   if (s.includes("nex-n2-pro") || s.includes("nex-agi/")) return true;
+  if (s.includes("deepseek-v4.1-flash") || s.includes("deepseek-v4-flash-vision")) return true;
   if (s.includes("gemini") && !s.includes("embedding")) return true;
   if (s.includes("gpt-4o") || s.includes("gpt-5")) return true;
   if (s.includes("claude") && (s.includes("opus") || s.includes("sonnet") || s.includes("haiku"))) {
@@ -45,6 +48,7 @@ export function resolveNativeVision(modelSlug: string): NativeVisionResolution {
   if (slugMatchesList(modelSlug, csv)) {
     return { enabled: true, source: "slug_list" };
   }
+  if(catalogVision.has(modelSlug))return {enabled:catalogVision.get(modelSlug)!,source:'catalog'};
   if (slugMatchesNativeVisionHeuristic(modelSlug)) {
     return { enabled: true, source: "slug_heuristic" };
   }
@@ -53,6 +57,27 @@ export function resolveNativeVision(modelSlug: string): NativeVisionResolution {
 
 export function modelSupportsNativeVision(modelSlug: string): boolean {
   return resolveNativeVision(modelSlug).enabled;
+}
+
+/** Switching to a text-only model preserves history while omitting unsupported pixels. */
+export function omitUnsupportedImagePixels(messages:Message[]):Message[]{
+ return messages.map(message=>{
+  if(message.role!=='user'||!Array.isArray(message.content))return message;
+  return {...message,content:message.content.map(part=>part.type==='image_url'?{type:'text' as const,text:'[Image pixels omitted: the selected model does not support native image input.]'}:part)};
+ });
+}
+
+/** Resolve unknown OpenRouter models from advertised modalities, with the shared catalog cache. */
+export async function modelSupportsNativeVisionAsync(modelSlug:string,baseURL?:string):Promise<boolean>{
+ const known=resolveNativeVision(modelSlug);
+ if(known.enabled||known.source==='catalog'||effectiveHarnessEnvRaw('AGENT_NATIVE_VISION')==='0')return known.enabled;
+ if(!baseURL||!/^https:\/\/openrouter\.ai(?:\/|$)/i.test(baseURL))return false;
+ try{
+  const {fetchOpenRouterSettingsCatalog}=await import('./openrouter_catalog.js');
+  const models=await fetchOpenRouterSettingsCatalog();
+  for(const model of models)catalogVision.set(model.id,model.inputModalities.includes('image'));
+ }catch{/* Unknown capability stays disabled; never silently call another model. */}
+ return resolveNativeVision(modelSlug).enabled;
 }
 
 async function attachmentDataUrl(att: ImageAttachment): Promise<string | null> {

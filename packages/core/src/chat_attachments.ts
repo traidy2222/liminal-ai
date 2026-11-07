@@ -229,7 +229,7 @@ export function buildMessageWithFileAttachments(
   lines.push("```");
   lines.push(
     "ATTACHED FILES: Workspace-relative paths above are readable with read_file / grep_file / file_metadata. " +
-      "For PDFs and office docs use doc_* tools when appropriate; for images use vision_analyze; " +
+      "For PDFs and office docs use doc_* tools when appropriate; for images use native image input or upload_image; " +
       "for audio use transcribe_audio. Do not assume file contents without reading them."
   );
   return lines.join("\n");
@@ -238,7 +238,8 @@ export function buildMessageWithFileAttachments(
 export async function resolveUserTurnWithChatAttachments(
   message: string,
   attachments: ChatFileAttachment[],
-  modelSlug: string
+  modelSlug: string,
+  baseURL?:string
 ): Promise<UserTurnContent> {
   const { images, files } = partitionChatAttachments(attachments);
   const imageItems: ImageAttachment[] = images.map((item) => ({
@@ -254,7 +255,7 @@ export async function resolveUserTurnWithChatAttachments(
     content = buildMessageWithFileAttachments(content, files);
   }
   if (imageItems.length > 0) {
-    return resolveUserTurnWithAttachments(content, imageItems, modelSlug);
+    return resolveUserTurnWithAttachments(content, imageItems, modelSlug,baseURL);
   }
   return content;
 }
