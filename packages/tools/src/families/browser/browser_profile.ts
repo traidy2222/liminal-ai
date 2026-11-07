@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { desktopBrowserEndpoint, requestDesktopBrowserTab } from "./browser_desktop.js";
+import { ensureBrowserElementRefs } from "./browser_element_refs.js";
 
 export function browserProfileRoot(): string {
   const base = process.env.LIMINAL_BROWSER_DATA_DIR || (process.platform === "win32"
@@ -22,7 +23,7 @@ export function readBrowserWorkspace(): Workspace {
       version: 1,
       selectedTabs: data.selectedTabs && typeof data.selectedTabs === "object" && !Array.isArray(data.selectedTabs)
         ? Object.fromEntries(Object.entries(data.selectedTabs).filter(([, id]) => typeof id === "string")) as Record<string, string> : {},
-      tabs: data.tabs.filter((t: BrowserTabRecord) => t && typeof t.sessionId === "string" && typeof t.url === "string").slice(0, 24),
+      tabs: data.tabs.filter((t: BrowserTabRecord) => t && typeof t.sessionId === "string" && typeof t.url === "string"),
       history: data.history.filter((h: Workspace["history"][number]) => h && typeof h.url === "string" && typeof h.title === "string").slice(-500),
     };
   } catch { /* first launch or damaged metadata; Chromium profile remains intact */ }
@@ -74,6 +75,7 @@ process.once("exit", unlockProfile);
 export async function acquireBrowserPage(tabId: string, options: {
   headed: boolean; viewport?: { width: number; height: number }; userAgent?: string;
 }): Promise<{ page: Page; context: BrowserContext; browser: Browser; backend: "webview" | "screencast" }> {
+  await ensureBrowserElementRefs();
   const { chromium } = await import("playwright");
   lockBrowserProfile();
   const endpoint = desktopBrowserEndpoint();
@@ -82,14 +84,18 @@ export async function acquireBrowserPage(tabId: string, options: {
       await requestDesktopBrowserTab("open", tabId);
       if (!attached || attached.endpoint !== endpoint || !attached.browser.isConnected()) {
         attaching ??= chromium.connectOverCDP(endpoint, { timeout: 15_000 });
-        try { attached = { endpoint, browser: await attaching }; } finally { attaching = undefined; }
+        try {
+          const browser=await attaching;
+          await ensureBrowserElementRefs(true);
+          attached = { endpoint, browser };
+        } finally { attaching = undefined; }
       }
       const browser = attached.browser;
       const marker = `about:blank#liminal-tab=${tabId}`;
       // Target discovery may trail native initialization by one CDP event.
       for (let n = 0; n < 100; n++) {
         const page = browser.contexts().flatMap(c => c.pages()).find(p => p.url() === marker);
-        if (page) return { page, context: page.context(), browser, backend: "webview" };
+        if (page) {if(options.viewport)await page.setViewportSize(options.viewport);return { page, context: page.context(), browser, backend: "webview" };}
         await new Promise(r => setTimeout(r, 50));
       }
       throw new Error("Could not attach to the displayed browser tab");

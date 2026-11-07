@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildSoulSlicesFromProfile,
   deriveDeterministicControls,
+  generatePersonaProfile,
+  requestedPersonaName,
   generatePersonaSoulArtifacts,
   generatePersonaUiTheme,
   personaUiThemeUsesLlm,
@@ -51,10 +53,10 @@ const sampleProfile: PersonaProfile = {
   strength: 8,
 };
 
-test("resolvePersonaSoulMode defaults to batch", () => {
+test("resolvePersonaSoulMode defaults to scaffold", () => {
   const prev = process.env.AGENT_PERSONA_SOUL_MODE;
   delete process.env.AGENT_PERSONA_SOUL_MODE;
-  assert.equal(resolvePersonaSoulMode(), "batch");
+  assert.equal(resolvePersonaSoulMode(), "scaffold");
   process.env.AGENT_PERSONA_SOUL_MODE = "parallel";
   assert.equal(resolvePersonaSoulMode(), "parallel");
   if (prev !== undefined) process.env.AGENT_PERSONA_SOUL_MODE = prev;
@@ -171,4 +173,27 @@ test("deriveDeterministicControls supplies runtime controls without LLM", () => 
     deriveDeterministicControls(sampleProfile, 8);
   assert.equal(controls.personaStrength, 8);
   assert.equal(controls.formality, "formal");
+});
+
+
+test('a concise persona needs one draft and no invented bans or rule quotas',async()=>{
+ let calls=0;let prompt='';
+ setPersonaGeneratorTestHooks({callPersonaModel:async(_key,_model,_base,_system,user)=>{calls++;prompt=user;return {...sampleProfile,neverDo:[],alwaysDo:[],speechStyle:{...sampleProfile.speechStyle,avoidWords:[]}};}});
+ try{
+  const profile=await generatePersonaProfile('Warm, unhurried botanist named Fern',5,undefined,'fixture','offline','http://127.0.0.1:1');
+  assert.equal(calls,1);assert.deepEqual(profile.neverDo,[]);assert.deepEqual(profile.alwaysDo,[]);assert.deepEqual(profile.speechStyle.avoidWords,[]);
+  assert.ok(prompt.length<2500);assert.doesNotMatch(prompt,/neverDo \(6|6–8|alwaysDo \(4|great question/);
+ }finally{setPersonaGeneratorTestHooks(undefined);}
+});
+
+
+test('explicit and brief names override associated places without repair calls',async()=>{
+ for(const [brief,name] of [['Sherlock Holmes',undefined],['a consulting detective named Sherlock Holmes with dry wit',undefined],['A detective, lives at 221B Baker Street','Sherlock Holmes']] as const){
+  let calls=0;setPersonaGeneratorTestHooks({callPersonaModel:async()=>{calls++;return {...sampleProfile,name:'221B Baker Street'};}});
+  try{const profile=await generatePersonaProfile(brief,5,undefined,'fixture','offline','http://127.0.0.1:1',undefined,undefined,undefined,name);
+   assert.equal(profile.name,'Sherlock Holmes');assert.equal(calls,1);
+  }finally{setPersonaGeneratorTestHooks(undefined);}
+ }
+ assert.equal(requestedPersonaName('warm voice','JARVIS'),'JARVIS');
+ assert.throws(()=>requestedPersonaName('brief','Name\nInjected line'),/one line/);
 });

@@ -1,12 +1,12 @@
 /** Reserve evidence space before budgeting controls; never cut off the whole readable section. */
-export function formatBrowserSnapshot(input:{observedAt:unknown;contexts:string[];controls:string[];readable:string;tree:string},maxChars=8000):string {
- const budget=Math.max(2000,maxChars),refBudget=Math.floor(budget*.36),textBudget=Math.floor(budget*.45);
+export function formatBrowserSnapshot(input:{observedAt:unknown;authentication?:unknown;contexts:string[];controls:string[];readable:string;tree:string},maxChars=8000):string {
+ const budget=Math.max(2000,maxChars),refBudget=Math.floor(budget*.48),textBudget=Math.floor(budget*.35);
  const lines:string[]=[];let used=0;
- for(const line of input.controls){if(used+line.length+1>refBudget)break;lines.push(line);used+=line.length+1;}
+ for(const line of input.controls){if(used+line.length+1>refBudget)continue;lines.push(line);used+=line.length+1;}
  const omitted=input.controls.length-lines.length;
  const context=input.contexts.join('\n');
  const readable=input.readable||input.tree||'(no rendered text)';
- return `OBSERVED_AT: ${JSON.stringify(input.observedAt)}\nPAGE_CONTEXT:\n${context.slice(0,Math.floor(budget*.12))}${context.length>budget*.12?'\n…(context truncated)':''}\nSNAPSHOT_REFS (unchanged controls retain refs; replaced or hidden controls expire):\n${lines.join('\n')||'  (no visible interactive controls)'}${omitted?'\n…('+omitted+' controls omitted; use browser_extract forms/links or a narrower view)':''}\nREADABLE_CONTENT:\n${readable.slice(0,textBudget)}${readable.length>textBudget?'\n…(text truncated; use browser_extract with query or offset)':''}\nA11Y_TREE_EXCERPT:\n`;
+ return `OBSERVED_AT: ${JSON.stringify(input.observedAt)}${input.authentication?'\nAUTHENTICATION_CONTEXT: '+JSON.stringify(input.authentication):''}\nPAGE_CONTEXT:\n${context.slice(0,Math.floor(budget*.12))}${context.length>budget*.12?'\n…(context truncated)':''}\nSNAPSHOT_REFS (unchanged controls retain refs; replaced or hidden controls expire):\n${lines.join('\n')||'  (no visible interactive controls)'}${omitted?'\n…('+omitted+' controls omitted; use browser_extract forms/links or a narrower view)':''}\nREADABLE_CONTENT:\n${readable.slice(0,textBudget)}${readable.length>textBudget?'\n…(text truncated; use browser_extract with query or offset)':''}\nA11Y_TREE_EXCERPT:\n`;
 }
 
 function section(text: string, label: string, end: string): string {
@@ -33,6 +33,9 @@ export class BrowserObservations {
     const oldText = section(before, "READABLE_CONTENT:\n", "\nA11Y_TREE_EXCERPT:");
     const text = section(current, "READABLE_CONTENT:\n", "\nA11Y_TREE_EXCERPT:");
     const parts = [current.split("\n")[0]!, "OBSERVATION_DELTA: Reuse unchanged refs and content from the previous observation of this URL. browser_snapshot returns a full view."];
+    const auth=current.split('\n').find(line=>line.startsWith('AUTHENTICATION_CONTEXT: ')),oldAuth=before.split('\n').find(line=>line.startsWith('AUTHENTICATION_CONTEXT: '));
+    if(auth&&auth!==oldAuth)parts.push(auth);
+    if(!auth&&oldAuth)parts.push('AUTHENTICATION_CONTEXT: null');
     if (context !== oldContext) parts.push("PAGE_CONTEXT:\n" + context);
     if (changed.length) parts.push("CHANGED_REFS:\n" + changed.join("\n"));
     if (removed.length) parts.push("EXPIRED_REFS: " + removed.join(", "));

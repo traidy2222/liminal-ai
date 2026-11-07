@@ -1,3 +1,21 @@
+import {before,after} from "node:test";
+import {mkdtempSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+import {PROVIDER_API_KEY_ENV_NAMES} from "./provider_api_key.js";
+// Provider unit tests must not discover a developer's real keys on disk.
+const isolatedKeys=[...PROVIDER_API_KEY_ENV_NAMES,'AGENT_LOCAL_API_KEY','AGENT_VISION_API_KEY','USERPROFILE','HOME','LIMINAL_REPO_ROOT'];
+let isolatedRoot:string;let isolatedPrevious:Record<string,string|undefined>;
+before(()=>{
+ isolatedRoot=mkdtempSync(join(tmpdir(),'liminal-provider-fixture-'));
+ isolatedPrevious=Object.fromEntries(isolatedKeys.map(key=>[key,process.env[key]]));
+ for(const key of isolatedKeys)delete process.env[key];
+ process.env.USERPROFILE=isolatedRoot;process.env.HOME=isolatedRoot;process.env.LIMINAL_REPO_ROOT=isolatedRoot;
+});
+after(()=>{
+ for(const key of isolatedKeys){const value=isolatedPrevious[key];if(value===undefined)delete process.env[key];else process.env[key]=value;}
+ rmSync(isolatedRoot,{recursive:true,force:true});
+});
 import test from "node:test";
 import assert from "node:assert/strict";
 import {

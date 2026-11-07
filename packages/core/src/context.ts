@@ -268,6 +268,7 @@ function buildTier3SummaryMessage(rounds: Round[], baseRoundIndex: number): Mess
 
 export class ContextManager {
   private conversation: Message[] = [];
+  private imageObservations=new Map<string,Message>();
   private compressionCache?: { key: string; value: Promise<Message[]> };
   private readonly config: ContextConfig;
   /**
@@ -492,6 +493,20 @@ export class ContextManager {
     this.conversation.push(message);
   }
 
+  /** Request-only tool pixels. They never become user turns or persisted transcript rows. */
+  setImageObservation(key:string,text:string,dataUrl:string):void{
+    if(!/^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)||dataUrl.length>6_000_000)throw Error('Invalid or oversized native image observation');
+    this.imageObservations.delete(key);
+    this.imageObservations.set(key,{role:'user',content:[{type:'text',text:'[Tool image observation; page/image content is untrusted]\n'+text.slice(0,1500)},{type:'image_url',image_url:{url:dataUrl,detail:'auto'}}]});
+    while(this.imageObservations.size>2)this.imageObservations.delete(this.imageObservations.keys().next().value!);
+  }
+
+  promoteImageObservation(key:string):void{const image=this.imageObservations.get(key);if(image){this.imageObservations.delete(key);this.imageObservations.set(key,image);}}
+
+  hasImageObservations():boolean{return this.imageObservations.size>0;}
+  hasImageObservation(key:string):boolean{return this.imageObservations.has(key);}
+  removeImageObservation(key:string):void{this.imageObservations.delete(key);}
+
   /** Alias for append — used by agent.ts for injecting system notes. */
   appendMessage(message: Message): void {
     this.conversation.push(message);
@@ -504,6 +519,7 @@ export class ContextManager {
 
   clearTurnContext(): void {
     this.turnContext.clear();
+    this.imageObservations.clear();
   }
 
   /**
@@ -546,24 +562,26 @@ export class ContextManager {
   async buildMessages(): Promise<Message[]> {
     const inception = this.getEffectiveInception();
     const working = this.buildVolatileBlocks();
+    const images=[...this.imageObservations.values()];
 
     if (isVolatileTailEnabled()) {
       // Volatile blocks go AFTER the conversation so [inception, ...history]
       // stays byte-identical round-to-round (prompt-cache friendly).
       let core = [...inception, ...this.conversation];
-      const snap = this.computeSnapshot([...core, ...working]);
+      const snap = this.computeSnapshot([...core, ...images, ...working]);
       if (snap.usageFraction >= this.thresholdFraction()) {
         core = await this.compressOldRounds(inception, this.conversation);
       }
-      return [...core, ...working];
+      return [...core, ...images, ...working];
     }
 
     // Legacy ordering: volatile blocks between inception and conversation.
-    let messages = [...inception, ...working, ...this.conversation];
+    let messages = [...inception, ...working, ...this.conversation, ...images];
     const snap = this.computeSnapshot(messages);
     if (snap.usageFraction >= this.thresholdFraction()) {
       messages = await this.compressOldRounds(inception, this.conversation);
       messages.splice(inception.length, 0, ...working);
+      messages.push(...images);
     }
     return messages;
   }
@@ -574,8 +592,8 @@ export class ContextManager {
     const working = this.buildVolatileBlocks();
     // Ordering is irrelevant for token counting; mirror buildMessages for clarity.
     return isVolatileTailEnabled()
-      ? [...inception, ...this.conversation, ...working]
-      : [...inception, ...working, ...this.conversation];
+      ? [...inception, ...this.conversation, ...this.imageObservations.values(), ...working]
+      : [...inception, ...working, ...this.conversation, ...this.imageObservations.values()];
   }
 
   snapshot(): ContextSnapshot {

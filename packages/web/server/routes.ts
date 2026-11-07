@@ -6,7 +6,7 @@ import type { SSEManager } from "./sse.js";
 import type { WebRemoteService } from "./web_remote.js";
 import type { ApprovalDecision, ChatWorkspaceMode } from "@liminal/core";
 import {
-  providerConnectionConfigured,discoverProviderModels,validateProviderSetup,persistValidatedProvider,
+  isLocalProviderUrl,providerSetupVerified,providerConnectionConfigured,discoverProviderModels,validateProviderSetup,persistValidatedProvider,
   DEFAULT_CHAT_ATTACHMENT_LIMITS,
   normalizeChatAttachmentName,
   parseDataUrlAttachment,
@@ -160,6 +160,7 @@ export function createRouter(
   webRemote?: WebRemoteService
 ): Router {
   const router = Router();
+  const acceptedMessageIds = new Set<string>();
 
   /** Convenience wrapper — every chat-scoped route calls this. */
   const active = () => chatManager.getActive();
@@ -206,6 +207,8 @@ export function createRouter(
       res.json({
         webAuthToken: localAuth.token,
         providerConfigured:providerConnectionConfigured(bridge.harness.config.openRouterApiKey),
+        providerVerified:await providerSetupVerified({baseURL:bridge.harness.config.baseURL,model:bridge.harness.config.model,apiKey:bridge.harness.config.openRouterApiKey}),
+        providerSetup:{baseURL:bridge.harness.config.baseURL,model:bridge.harness.config.model,local:isLocalProviderUrl(bridge.harness.config.baseURL??'')},
         uiVerbosity: uiRaw === "quiet" ? "quiet" : "normal",
         approvalTimeoutMs: bridge.harness.getApprovalTimeoutMs(),
         personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
@@ -1504,7 +1507,10 @@ export function createRouter(
     let reserved = false;
     let handedOff = false;
     try {
+    const requestId=typeof req.body?.requestId==='string'?req.body.requestId:undefined;
+    if(requestId&&acceptedMessageIds.has(requestId)){res.json({ok:true});return;}
     bridge = active();
+    if(requestId&&bridge.hasAcceptedRequest(requestId)){res.json({ok:true});return;}
     if (pendingMessages.has(bridge) || bridge.isBusy) {
       res.status(409).json({ error: "Agent is already processing a message" });
       return;
@@ -1568,12 +1574,14 @@ export function createRouter(
     const persisted = await persistIncomingAttachments(normalizedAttachments);
     const admittedBridge = bridge;
     const send = admittedBridge.sendUserMessage(msg, {
+        requestId,
         freshContext: Boolean(freshContext),
         liveDictation: Boolean(liveDictation),
         chatAttachments: persisted,
         workflowPreset,
       });
     handedOff = true;
+    if(requestId){acceptedMessageIds.add(requestId);if(acceptedMessageIds.size>256)acceptedMessageIds.delete(acceptedMessageIds.values().next().value!);}
     void send.catch((err) => {
       const message = err instanceof Error ? err.message : "Failed to process message.";
       sse.send("error", { message }, admittedBridge.chatId);
@@ -1589,10 +1597,10 @@ export function createRouter(
   router.post('/api/persona/cancel',(_req,res)=>{active().cancelPersonaBootstrap();res.json({ok:true});});
   router.post("/api/persona/bootstrap", async (req, res) => {
     const bridge = active();
-    const { input, skip } = req.body as { input?: string; skip?: boolean };
+    const { input, skip, name } = req.body as { input?: string; skip?: boolean; name?:string };
     try {
       await bridge.whenSessionReady();
-      await bridge.submitPersonaBootstrap(String(input ?? ""), { skip: Boolean(skip) });
+      await bridge.submitPersonaBootstrap(String(input ?? ""), { skip: Boolean(skip),name:typeof name==="string"?name:undefined });
       res.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Persona bootstrap failed.";

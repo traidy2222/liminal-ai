@@ -7,9 +7,14 @@ import type { ToolResult } from "./types.js";
 export function isRecoverableToolFailure(name: string, result: ToolResult): boolean {
   if (result.ok) return false;
   const err = result.error.toLowerCase().split("\naction_progress:")[0]!;
+  if(name==='browser_credentials'&&/account_evidence_(?:required|mismatch)|record_account requires|account evidence was not found|is not a current password input|must be an e-number/.test(err))return true;
+  // A stale/unsuitable puzzle observation needs correction, not a service outage
+  // cooldown. Provider, account/balance and transport errors retain the circuit.
+  if (name.startsWith('captcha_') && !/http \d|econn|network|timeout|timed out|zero_balance|key.*(?:invalid|not set)|browser has been closed|target.*closed|crash/.test(err) &&
+      /visible_visual_challenge|visual_challenge_changed|invalid_visual_solution|unknown visual ref|source_region must|visual target is|visual challenge is still changing|no paid task submitted|solver destination is outside|solver coordinates lie outside/.test(err)) return true;
   // Bad browser arguments, stale DOM refs and unavailable selectors are a
   // correction/observation problem, not a browser backend outage.
-  if (name.startsWith("browser_") && /unknown (?:action op|ref|(?:browser )?session)|each action needs|pass `actions`|wait_ms:|select_option_ref:|locator\.(?:click|fill|clear|selectoption|waitfor):|browser_act step/.test(err) &&
+  if (name.startsWith("browser_") && /no_progress|unknown (?:action op|ref|(?:browser )?session)|each action needs|pass `actions`|wait_ms:|select_option_ref:|timeout waiting for url|locator\.(?:click|fill|clear|selectoption|waitfor):|browser_act step/.test(err) &&
       !/browser has been closed|target.*closed|connection.*closed|crash/.test(err)) return true;
 
   // A program exited unsuccessfully, but the execution tool is healthy. A new

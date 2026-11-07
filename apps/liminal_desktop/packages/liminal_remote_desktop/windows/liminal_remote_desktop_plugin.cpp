@@ -246,7 +246,10 @@ class LiminalRemoteDesktopPlugin : public flutter::Plugin {
       if (length <= 1) { result->Error("folder", "Invalid browser profile folder"); return; }
       std::wstring wide_folder(length, L'\0');
       MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, folder.c_str(), -1, wide_folder.data(), length);
-      const auto flags = L"--remote-debugging-address=127.0.0.1 --remote-debugging-port=" + std::to_wstring(port);
+      // Agent-owned WebViews must keep producing frames while the app is hidden.
+      // Tabs are still hibernated by the runtime when idle; avoid disabling timers.
+      const auto flags = L"--remote-debugging-address=127.0.0.1 --remote-debugging-port=" + std::to_wstring(port) +
+          L" --disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows --disable-renderer-backgrounding";
       if (!SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", wide_folder.c_str()) ||
           !SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags.c_str())) {
         result->Error("configure", "Could not initialize browser control"); return;

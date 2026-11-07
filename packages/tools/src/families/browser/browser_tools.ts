@@ -2,6 +2,7 @@
  * Playwright browser tools — session-based agentic workflow (see browser_runtime.ts).
  */
 import { defineTool } from "../../shared/helpers.js";
+import {indexBrowserLoginMetadata} from './browser_credentials.js';
 import type { AgentHarness, PropertySchema } from "@liminal/core";
 import {
   browserEnabled,
@@ -40,9 +41,10 @@ import {
 } from "./browser_runtime.js";
 import path from "node:path";
 import fs from "node:fs";
-import { resolveWorkspaceRoot } from "@liminal/core";
+import { resolveWorkspaceRoot, effectiveHarnessEnvRaw } from "@liminal/core";
 import { findingsForTask, type BrowserFindingInput } from "./browser_findings.js";
-import {withBrowserTask} from './browser_queue.js';
+import {withBrowserTask,isCurrentBrowserTask} from './browser_queue.js';
+import {attachBrowserImage} from './browser_native_images.js';
 import {browserResearchCheckpointPath} from './browser_research_checkpoint.js';
 import {requestedBrowserDates,applyBrowserDateContext,isCurrentBrowserTabHandle,browserPageMatches} from './browser_navigation_context.js';
 
@@ -82,9 +84,7 @@ function parseWaitUntil(raw: unknown): WaitUntilNav | { error: string } {
   return { error: "wait_until ∈ domcontentloaded | load | networkidle" };
 }
 
-function visionHintLine(): string {
-  return "\n[Hint] For layout checks: activate_tool_family vision if needed, then vision_analyze with image=<SCREENSHOT_PATH> and a concrete prompt.\n";
-}
+
 
 export const browserOpenTool = defineTool({
   name: "browser_open",
@@ -164,7 +164,7 @@ export const browserOpenTool = defineTool({
     });
     if (!opened.ok) return opened;
 
-    return { ok: true, output: opened.output + (opened.output.includes('SCREENSHOT_PATH:')?visionHintLine():'') };
+    return { ok: true, output: opened.output };
   },
 });
 
@@ -246,7 +246,7 @@ export const browserNavigateTool = defineTool({
       screenshot: args["screenshot"] === true,
     });
     if (!res.ok) return res;
-    return { ok: true, output: (contextual.changes.length?'NAVIGATION_CONTEXT_APPLIED: '+contextual.changes.join(', ')+'\n':'')+res.output + (res.output.includes('SCREENSHOT_PATH:')?visionHintLine():'') };
+    return { ok: true, output: (contextual.changes.length?'NAVIGATION_CONTEXT_APPLIED: '+contextual.changes.join(', ')+'\n':'')+res.output };
   },
 });
 
@@ -258,10 +258,17 @@ const value = {type: "string"} as const;
 const selector = {type: "string"} as const;
 const timeout_ms = {type: "number"} as const;
 export const BROWSER_ACTION_SCHEMA: PropertySchema = { anyOf: [
+  actionObject(['drag_at'],['from_x','from_y','to_x','to_y'],{from_x:{type:'number',minimum:0,maximum:100000},from_y:{type:'number',minimum:0,maximum:100000},to_x:{type:'number',minimum:0,maximum:100000},to_y:{type:'number',minimum:0,maximum:100000},duration_ms:{type:'integer',minimum:100,maximum:5000}}),
+  actionObject(["click_at"], ["x","y"], {x:{type:"number",minimum:0,maximum:100000},y:{type:"number",minimum:0,maximum:100000}}),
+  actionObject(["type_text"], ["value"], {value:{type:"string",minLength:1,maxLength:16000}}),
   actionObject(["reload"], [], {wait_until:{type:"string",enum:["load","domcontentloaded"]},timeout_ms}),
   actionObject(["wait_ms"], ["ms"], {ms: {type: "number", minimum: 0, maximum: 120000}}),
+  actionObject(["wait_ms"], ["value"], {value: {type: "number", minimum: 0, maximum: 120000}}),
+  actionObject(["wait_ms"], ["wait_ms"], {wait_ms: {type: "number", minimum: 0, maximum: 120000}}),
+  {type:'object',properties:{wait_ms:{type:'number',minimum:0,maximum:120000}},required:['wait_ms'],additionalProperties:false},
   actionObject(["fill_ref", "type_ref", "select_option_ref"], ["ref", "value"], {ref, value, timeout_ms, delay_ms: {type: "number"}}),
   actionObject(["click_ref", "double_click_ref", "check_ref", "uncheck_ref", "focus_ref", "clear_ref", "hover_ref"], ["ref"], {ref, timeout_ms}),
+  actionObject(["press_and_hold_ref"], ["ref","duration_ms"], {ref,duration_ms:{type:"integer",minimum:100,maximum:15000,description:"Hold the left mouse button continuously, then release; milliseconds. Use an observed enabled control."},timeout_ms}),
   actionObject(["press_key"], ["key"], {key: {type: "string"}}),
   actionObject(["press_key_ref"], ["ref", "key"], {ref, key: {type: "string"}, timeout_ms}),
   actionObject(["fill", "select_option"], ["selector", "value"], {selector, value, timeout_ms}),
@@ -269,7 +276,7 @@ export const BROWSER_ACTION_SCHEMA: PropertySchema = { anyOf: [
   actionObject(["goto"], ["url"], {url: {type: "string"}, wait_until: {type: "string", enum: ["load", "domcontentloaded", "networkidle"]}, timeout_ms}),
   actionObject(["click_role"], ["role", "name"], {role: {type: "string"}, name: {type: "string"}, exact: {type: "boolean"}, timeout_ms}),
   actionObject(["click_text", "double_click_text"], ["text"], {text: {type: "string"}, exact: {type: "boolean"}, timeout_ms}),
-  actionObject(["scroll"], ["direction"], {direction: {type: "string", enum: ["top", "bottom", "up", "down"]}, px: {type: "number"}}),
+  actionObject(["scroll"], ["direction"], {direction: {type: "string", enum: ["top", "bottom", "up", "down", "left", "right"]}, px: {type: "number"}}),
   actionObject(["wait_selector"], ["selector"], {selector, state: {type: "string", enum: ["visible", "attached"]}, timeout_ms}),
   actionObject(["wait_navigation"], [], {wait_until: {type: "string", enum: ["load", "domcontentloaded", "networkidle"]}, timeout_ms}),
   actionObject(["screenshot"], [], {full_page: {type: "boolean"}}),
@@ -279,9 +286,10 @@ export const browserActTool = defineTool({
   name: "browser_act",
   description:
     "WHAT: Run structured actions on this chat's selected browser tab. Omit session_id unless switching to another observed tab; url opens a new tab.\n" +
-    "Ops: reload (refresh the current tab and preserve its URL), double_click_ref / double_click_text (native double-click, e.g. inline editing), select_option_ref (native or custom dropdown; value is its option label), goto, wait_ms, scroll, click_ref, fill_ref, focus_ref, clear_ref, type_ref, press_key_ref, press_key, click_selector (selector field), wait_navigation, screenshot, …\n" +
+    "Ops: press_and_hold_ref (ref + duration_ms; continuous pointer hold then release, including embedded frames), reload (refresh the current tab and preserve its URL), double_click_ref / double_click_text (native double-click), select_option_ref (native or custom dropdown; value is its option label), goto, wait_ms, scroll, click_ref, fill_ref, focus_ref, clear_ref, type_ref, press_key_ref, press_key, click_selector (selector field), wait_navigation, screenshot, …\n" +
     "Examples: { op:'goto', url:'https://news.ycombinator.com/ask' }; { op:'type_ref', ref:'e2', value:'query' }; { op:'press_key', key:'Enter' }.\n" +
-    "fill_ref replaces a field value; use type_ref when key-by-key events are needed. check_ref/uncheck_ref set checkbox state idempotently. SNAPSHOT_REFS include row context, focus, values, validation and checked state.\n" +
+    "fill_ref replaces a field value; use type_ref when key-by-key events are needed. check_ref/uncheck_ref set checkbox state idempotently. SNAPSHOT_REFS include row context, focus, values, validation and checked state. Copy-link actions return PAGE_COPY_LINKS when the page supplies a URL; the existing system clipboard is never read.\n" +
+    "For screenshot-only controls: click_at {x,y}, drag_at {from_x,from_y,to_x,to_y,duration_ms:900}, and type_text {value} at keyboard focus. All coordinates are current viewport CSS pixels. Drag uses a real held pointer and releases it on cancellation. Batch related actions; prefer observed refs when available. Use browser_credentials for secrets. For editor shortcuts, press_key_ref focuses the exact editor; editor_path and editor_depth describe nested rows.\n" +
     "Same-page actions return changed controls/content; reuse unchanged refs. full_snapshot=true returns a full view. An executed click is not proof of success. Failures return fresh refs and candidate destinations; retry only unfinished steps. refresh_snapshot=false omits page content; with only session_id, observes the full current page.",
   requiresApproval: true,
   dangerLevel: "cautious",
@@ -311,14 +319,15 @@ export const browserActTool = defineTool({
     },
     additionalProperties: false,
   },
-  handler: async (args, _emit, harness) => {
+  handler: async (args, _emit, harness, context) => {
     const gate = browserGate();
     if (!gate.ok) return gate;
 
     if(args.actions===undefined&&args.steps===undefined&&args.session_id){
       return snapshotBrowserSession(String(args.session_id),args.include_console===true);
     }
-    const parsed = parseActionsFromArgs(args["actions"], args["steps"]);
+    const parsed = args.actions===undefined&&args.steps===undefined&&args.url
+      ? [] : parseActionsFromArgs(args["actions"], args["steps"]);
     if (!Array.isArray(parsed)) {
       return { ok: false, error: parsed.error };
     }
@@ -340,9 +349,10 @@ export const browserActTool = defineTool({
         refreshSnapshot,
         includeConsole,
         compactObservation: args.full_snapshot !== true,
+        signal: context?.signal,
       });
       if (!res.ok) return res;
-      return { ok: true, output: res.output + (res.output.includes('SCREENSHOT_PATH:')?visionHintLine():'') };
+      return { ok: true, output: res.output };
     }
 
     const urlRaw = String(args["url"] ?? "").trim();
@@ -367,6 +377,7 @@ export const browserActTool = defineTool({
       includeConsole,
     });
     if (!opened.ok) return opened;
+    if(!actions.length)return opened;
     return actOnBrowserSession({
       sessionId: opened.sessionId,
       actions,
@@ -374,6 +385,7 @@ export const browserActTool = defineTool({
       includeConsole,
       refreshSnapshot,
       compactObservation: args.full_snapshot !== true,
+      signal:context?.signal,
     });
   },
 });
@@ -419,7 +431,7 @@ export const browserCloseTool = defineTool({
       screenshot: args["screenshot"] === true,
     });
     if (!res.ok) return res;
-    return { ok: true, output: res.output + visionHintLine() };
+    return { ok: true, output: res.output };
   },
 });
 
@@ -472,6 +484,7 @@ export const browserServeFileTool = defineTool({
 
 /** Publish app-owned browser tabs to the originating chat. */
 export function wireBrowserHarnessCleanup(harness: AgentHarness): void {
+  try{indexBrowserLoginMetadata();}catch{/* Browser metadata must not prevent harness startup. */}
   registerBrowserTurnCleanup(harness);
   harness.onCollectBrowserDiagnostics = (taskId) => collectBrowserDiagnosticsForTask(taskId);
   setBrowserViewPublisher((payload) => {
@@ -487,7 +500,7 @@ export const browserWaitForTool = defineTool({
   description:
     "WHAT: Wait for a condition on an existing browser session before continuing.\n" +
     "Conditions: selector (element visible), selector_hidden, text (text present), url_contains (URL changed), network_idle.\n" +
-    "WHEN: After browser_act triggers an async action (form submit, SPA navigation) — wait before reading snapshot.",
+    "WHEN: After browser_act triggers an async action (form submit, SPA navigation). Returns fresh page text and refs after success or timeout; continue from that screen. Network idle only describes network activity, not task completion.",
   requiresApproval: true,
   dangerLevel: "cautious",
   parameters: {
@@ -552,7 +565,12 @@ export const browserTabsTool = defineTool({
     const gate = browserGate(); if (!gate.ok) return gate;
     const task = harness?.taskId ?? "anonymous";
     const state = browserWorkspaceState(task);
-    return { ok: true, output: JSON.stringify({ profile: "default", selectedTabId: state.selectedTabId && harness ? modelSessionId(state.selectedTabId) : state.selectedTabId, tabs: state.tabs.map(t=>({session_id:harness?modelSessionId(t.sessionId):t.sessionId,title:t.title,url:t.url,paused:t.paused,suspended:t.suspended})) }) };
+    const captchaSolver = effectiveHarnessEnvRaw('AGENT_CAPTCHA_KEY')?.trim() ? {
+      token_tool:'captcha_solve', inspect_tool:'captcha_inspect', service:effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')?.trim()||'2captcha',
+      supported_types:['recaptcha_v2','recaptcha_v3','hcaptcha','turnstile','image',...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?[]:['coordinates'])],
+      ...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?{}:{drag_tool:'captcha_drag'}),
+    } : undefined;
+    return { ok: true, output: JSON.stringify({ profile: "default", selectedTabId: state.selectedTabId && harness ? modelSessionId(state.selectedTabId) : state.selectedTabId, tabs: state.tabs.map(t=>({session_id:harness?modelSessionId(t.sessionId):t.sessionId,title:t.title,url:t.url,paused:t.paused,suspended:t.suspended})),captchaSolver }) };
   },
 });
 
@@ -582,15 +600,30 @@ export const browserSearchTool = defineTool({
 
 export const browserCredentialsTool = defineTool({
   name: "browser_credentials",
-  description: "Prepare a cryptographically generated password in Liminal's encrypted local credential store, or autofill a saved login on its exact HTTPS origin. Passwords never appear in tool arguments/results. prepare needs username and returns credential_id as login.id; fill needs credential_id and fresh password_ref (optional username_ref/confirm_password_ref). list returns saved login metadata for this site. Preparing/filling is not proof an account was created; submit normally and verify the resulting page.",
+  description: "Manage shared account metadata and encrypted local logins. accounts lists accounts across chats without a tab. prepare needs username and returns login.id as credential_id; fill needs credential_id and fresh password_ref (optional username_ref/confirm_password_ref). list returns this site's saved logins. After successful signup/sign-in, record_account with username, owner (assistant/user), credential_id if present, and a short evidence quote from the resulting page; this makes the account available automatically in future chats. Preparing/filling alone never marks signup complete. For passwordless sign-in, record login_method=email_code, magic_link or oauth without preparing/linking an unused password. Passwords never appear in tool arguments/results.",
   requiresApproval: false, dangerLevel: "cautious",
   parameters: { type: "object", properties: {
-    action: {type: "string", enum: ["prepare", "fill", "list"]}, session_id: {type: "string"},
+    action: {type: "string", enum: ["prepare", "fill", "list", "accounts", "record_account"]}, session_id: {type: "string"},
+    owner:{type:'string',enum:['assistant','user','unknown']},email:{type:'string'},
+    login_method:{type:'string',enum:['password','email_code','magic_link','oauth','unknown'],description:'Observed sign-in method; defaults to unknown. A signed-in session can be recorded before its future login method is established.'},
+    status:{type:'string',enum:['active','blocked','closed']},evidence:{type:'string',minLength:5,maxLength:500,description:'Required for record_account: an exact short visible phrase from the current success/signed-in or blocked/closed page. No paraphrase or explanation.'},
     username: {type: "string"}, credential_id: {type: "string"}, username_ref: {type: "string"},
     password_ref: {type: "string", description: "e-number for Password from the latest SNAPSHOT_REFS, e.g. e1"}, confirm_password_ref: {type: "string", description: "e-number for Confirm password, e.g. e2"},
-  }, required: ["action", "session_id"], additionalProperties: false },
+  }, required: ["action"], additionalProperties: false },
   handler: async args => { const gate = browserGate(); return gate.ok ? browserCredentialAction(args) : gate; },
 });
+
+// Keep one tool, but publish and validate each action's actual contract.
+const credentialVariants: Array<[string,string[],string[]]> = [
+ ['accounts',[],[]],['list',[],[]],
+ ['prepare',['username'],['username','owner']],
+ ['fill',['credential_id','password_ref'],['credential_id','username_ref','password_ref','confirm_password_ref']],
+ ['record_account',['evidence'],['username','credential_id','email','owner','status','evidence','login_method']],
+];
+browserCredentialsTool.parameters.anyOf=credentialVariants.map(([action,required,allowed])=>({type:'object',
+ properties:Object.fromEntries([['action',{type:'string',enum:[action]}],...['session_id',...allowed].map(key=>[key,{}])]),
+ required:['action',...required],additionalProperties:false,
+}));
 
 
 export const browserExtractTool = defineTool({
@@ -748,6 +781,7 @@ for (const tool of [browserSnapshotTool, browserNavigateTool, browserActTool, br
   browserWaitForTool, browserExtractTool, browserCookiesTool, browserCredentialsTool]) {
   const handler = tool.handler;
   tool.handler = async (args, emit, harness, context) => {
+    if(tool===browserCredentialsTool&&args.action==='accounts')return handler(args,emit,harness,context);
     if(tool===browserExtractTool&&args.type==='findings'&&harness&&(args.findings===undefined||Array.isArray(args.findings)&&args.findings.length===0))
       return handler(args,emit,harness,context);
     const newTabAction=tool===browserActTool&&!!args.url;
@@ -783,6 +817,7 @@ for (const tool of [browserSnapshotTool, browserNavigateTool, browserActTool, br
       if (error) return { ok: false, error };
     }
     if(id&&tool!==browserCloseTool){const restored=await ensureBrowserSessionActive(id);if(!restored.ok)return restored;}
+    if(id&&harness&&tool!==browserCloseTool){focusedTaskTabs.set(harness,id);selectBrowserTaskTab(harness.taskId,id);}
     const navigation=tool===browserNavigateTool||tool===browserActTool?contextualNavigationArgs(args,harness):{args,changes:[]};
     let result=await handler(navigation.args,emit,harness,context);
     if(result.ok&&navigation.changes.length)result={...result,output:'NAVIGATION_CONTEXT_APPLIED: '+navigation.changes.join(', ')+'\n'+result.output};
@@ -802,5 +837,13 @@ for(const tool of [browserOpenTool,browserSearchTool,browserTabsTool,browserSnap
  const handler=tool.handler;
  const sessionProperty=tool.parameters.properties?.session_id;
  if(sessionProperty)sessionProperty.description="Optional observed tab ID. Omit, or use 'current', for this chat's selected tab.";
- tool.handler=(args,emit,harness,context)=>withBrowserTask(harness?.taskId??'anonymous',()=>handler(args,emit,harness,context));
+ tool.handler=(args,emit,harness,context)=>{
+  if(tool===browserCredentialsTool&&args.action==='accounts')return handler(args,emit,harness,context);
+  const taskId=harness?.taskId??'anonymous',nested=isCurrentBrowserTask(taskId);
+  return withBrowserTask(taskId,async()=>{
+   if(harness){harness.registry?.activate(['captcha_inspect']);if(effectiveHarnessEnvRaw('AGENT_CAPTCHA_KEY')?.trim())harness.registry?.activate(['captcha_solve',...(effectiveHarnessEnvRaw('AGENT_CAPTCHA_SERVICE')==='capsolver'?[]:['captcha_drag'])]);}
+   const result=await handler(args,emit,harness,context);
+   return nested?result:attachBrowserImage(harness,tool.name,result);
+ });
+ };
 }

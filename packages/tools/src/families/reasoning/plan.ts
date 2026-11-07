@@ -15,17 +15,16 @@ import { defineTool } from "../../shared/helpers.js";
 export const planTool = defineTool({
   name: "plan",
   description:
-    "WHAT: Emit a numbered execution plan before starting a multi-step task. " +
-    "Call with step_index to mark a step done as you complete each one.\n" +
-    "WHEN: Task requires 3+ distinct tool calls. Re-call with step_index after each step.\n" +
-    "NOT WHEN: Re-planning from scratch — use steps[] again to replace the plan.\n" +
-    "COVERAGE: When the user message has several requirements, mirror them as separate steps so none are dropped (R-MULTI-PART-USER).\n" +
-    "ARGS: steps — ordered array of step descriptions (provide when creating a new plan); " +
-    "step_index — 0-based index of the step just completed (provide to mark progress).",
+    "Track requested results and progress. Create/add outcomes[] with one outcome per independently requested item or condition, including implicit details; the response gives stable IDs. Batch updates[] with status completed plus an exact visible quote and observation_id from successful returned page state, or blocked plus the actual reason. Reuse existing evidence; an action receipt alone is not proof. The final reply is a handoff, not a pending external-work outcome. steps/step_index remain for legacy non-browser plans.",
   requiresApproval: false,
   parameters: {
     type: "object",
     properties: {
+      outcomes: {type:'array',items:{type:'string'},description:'Requested results to track. Additive: existing items are preserved, including explicit user lists.'},
+      updates: {type:'array',items:{type:'object',properties:{
+        id:{type:'string'},status:{type:'string',enum:['completed','blocked']},reason:{type:'string'},subject:{type:'string',description:'Optional exact item name within an original bullet that also includes instructions or details.'},
+        evidence:{type:'array',items:{type:'object',properties:{observation_id:{type:'string'},quote:{type:'string'}},required:['observation_id','quote'],additionalProperties:false}}
+      },required:['id','status'],additionalProperties:false}},
       steps: {
         type: "array",
         items: { type: "string" },
@@ -60,7 +59,15 @@ export const planTool = defineTool({
     },
     additionalProperties: false,
   },
-  handler: async (args) => {
+  handler: async (args,_emit,harness) => {
+    const ledger=harness?.getTaskCompletionLedger();
+    if(args.outcomes!==undefined||args.updates!==undefined){
+      if(!ledger)return {ok:false,error:'No active request to track.'};
+      return ledger.update({outcomes:args.outcomes as string[]|undefined,updates:args.updates as import('@liminal/core').OutcomeUpdate[]|undefined});
+    }
+    if(ledger?.active&&typeof args.step_index==='number')return {ok:false,error:'Track browser completion with updates[] and returned observation evidence. '+ledger.render()};
+    if(ledger?.active&&Array.isArray(args.steps)){const tracked=ledger.update({outcomes:args.steps as string[]});if(!tracked.ok)return tracked;}
+
     const steps = args["steps"] as string[] | undefined;
     const stepIndex = args["step_index"] as number | undefined;
 

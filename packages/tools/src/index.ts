@@ -77,7 +77,7 @@ import {
   type EnsureTerminalResult,
 } from "./families/shell/terminal_runtime.js";
 import { setPtyShellPort, type PtyManagerPort } from "./families/shell/pty_shell_port.js";
-import { captchaSolveTool } from "./families/browser/captcha_solve.js";
+import { captchaSolveTool,captchaInspectTool,captchaDragTool } from "./families/browser/captcha_solve.js";
 import { createOrchestrationTools } from "./families/orchestration/orchestration.js";
 import { createAgentContextTools } from "./families/orchestration/agent_context_tools.js";
 import {
@@ -169,7 +169,6 @@ import { taskCheckpointTool, resumeTaskTool } from "./families/tasks/task_persis
 import { featureChecklistTool } from "./families/tasks/feature_checklist.js";
 import { createExtractStructuredTool } from "./families/harness_ui/extract_structured.js";
 import { createUploadImageTool } from "./families/vision/upload_image.js";
-import { visionAnalyzeTool } from "./families/vision/vision_analyze.js";
 import { createTranscribeAudioTool } from "./families/audio/transcribe_audio.js";
 import { createSpeakTool, installVoiceTtsFallback } from "./families/audio/speak.js";
 import { docPlanTool } from "./families/document/doc_plan.js";
@@ -340,11 +339,12 @@ export async function registerAllTools(
   registry.register(browserExtractTool);
   registry.register(browserCookiesTool);
   registry.register(captchaSolveTool);
+  registry.register(captchaInspectTool);
+  registry.register(captchaDragTool);
   registry.register(suggestImprovementTool);
   registry.register(viewInsightsTool);
   registry.register(selfTelemetryTool);
   registry.register(pasteTrainTool);
-  registry.register(visionAnalyzeTool);
   // Obsidian brain
   registry.register(vaultWriteTool);
   registry.register(vaultReadTool);

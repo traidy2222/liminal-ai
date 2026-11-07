@@ -25,6 +25,7 @@ export interface ClientCommandMap {
   procedure_manage: {chatId:string;action:"list"|"inspect"|"evidence"|"preview_contract"|"adopt_contract"|"learn"|"validate"|"correct"|"retire"|"recover"|"disable";versionId?:string;contractPath?:string;expectedSourceHash?:string;eventId?:string;offset?:number;contractId?:string;runId?:string;inputs?:Record<string,unknown>;correction?:string;disabled?:boolean};
   /** Start a turn. Resolves (command_result) once the send has been accepted, not when the turn ends. */
   send_message: {
+    requestId?:string;
     chatId: string;
     message: string;
     freshContext?: boolean;
@@ -67,7 +68,7 @@ export interface ClientCommandMap {
   /** Clear a chat's transcript; `greet` re-runs the opening greeting / bootstrap gate. */
   reset_session: { chatId: string; greet?: boolean; rebootstrap?: boolean };
   /** Submit persona-bootstrap input (or `skip`) for a chat awaiting it. */
-  submit_persona_bootstrap: { chatId: string; input: string; skip?: boolean };
+  submit_persona_bootstrap: { chatId: string; input: string; skip?: boolean; name?:string };
 
   /** App shell snapshot (provider configured, persona bootstrap gate, display label). */
   get_config: Record<string, never>;

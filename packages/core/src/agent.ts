@@ -1,4 +1,6 @@
+import { TaskCompletionLedger } from './task_completion.js';
 import {fingerprint as procedureFingerprint} from "./procedural_memory/model.js";
+import {savedAccountContext} from './account_directory.js';
 import {ProcedureRuntime} from "./procedural_memory/runtime.js";
 import { buildReasoningRequestParams } from "./reasoning_request.js";
 import { warmProviderValueCatalog, observeProviderPerformance, selectedProviderEndpoint } from "./provider_value_routing.js";
@@ -45,7 +47,7 @@ import { scrubMessagesSpecialTokens } from "./provider_token_scrub.js";
 import {
   type ImageAttachment,
 } from "./image_attachments.js";
-import { modelSupportsNativeVision } from "./native_vision.js";
+import { modelSupportsNativeVision,modelSupportsNativeVisionAsync,omitUnsupportedImagePixels } from "./native_vision.js";
 import {
   isStreamTransportRetryable,
   resolveStreamChunkTimeoutMs,
@@ -400,6 +402,7 @@ import type { PendingTurnLearningRecord } from "./outcome_scorer.js";
 import { WorldContextRefresher } from "./world_context_delta.js";
 import {
   needsUserReplyFinalization,
+  USER_REPLY_FINALIZE_SYSTEM,
 } from "./user_reply_guard.js";
 import {
   buildOpenRouterFusionRequestExtras,
@@ -883,6 +886,7 @@ function emitProcessedStreamText(
   opts: {
     reasoningSurface: "native" | "external";
     onPseudoMarkup?: () => void;
+    onUserText?: (text:string) => void;
   }
 ): void {
   if (parsed.inlineReasoningDelta) {
@@ -896,7 +900,8 @@ function emitProcessedStreamText(
     opts.onPseudoMarkup?.();
     return;
   }
-  emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
+  if(opts.onUserText)opts.onUserText(parsed.textDelta);
+  else emitter.emit("text", { delta: parsed.textDelta, channel: "user" });
 }
 
 /** Harness-injected user turn: model greets on new session (no tools). */
@@ -1278,6 +1283,10 @@ export class AgentHarness {
   /** True once world context has been injected (only happens on the first send() of a root agent). */
   private worldContextInjected = false;
   private resumeMissionInjectedThisSend = false;
+  private taskCompletion: TaskCompletionLedger | null = null;
+  private completionRecoveryAttempts = 0;
+  getTaskCompletionLedger(): TaskCompletionLedger | null { return this.taskCompletion; }
+
   private missionChainedSendsThisSession = 0;
   /**
    * Root harness: schedule an internal continuation send after mission turn_end.
@@ -1427,6 +1436,7 @@ export class AgentHarness {
 
   /** Active persona. Set via setPersona(); defaults to config.persona or unnamed default. */
   private currentPersona?: PersonaConfig;
+  private personaSupplement = "";
   /** Cross-harness shared memory bus (created on root, propagated to children). */
   readonly sharedBus: SharedMemoryBus;
   /** Long-horizon runtime state persisted by task_checkpoint and heartbeat events. */
@@ -1791,7 +1801,7 @@ export class AgentHarness {
 
     const proactiveMaster = proactiveVerificationEnabled();
 
-    if (opts.hadEdits && proactiveLintAfterEditsEnabled() && this.registry.has("run_lint")) {
+    if (proactiveMaster && opts.hadEdits && proactiveLintAfterEditsEnabled() && this.registry.has("run_lint")) {
       const { typedCode, webAssets } = classifyChangedFiles([...this.changedFilesThisTurn]);
       if (typedCode.length > 0 && opts.batchKey !== this.proactiveLintBatchKey) {
         this.proactiveLintBatchKey = opts.batchKey;
@@ -2083,9 +2093,10 @@ export class AgentHarness {
    * @param block  - The pre-built system-prompt string for the identity block.
    *                 Built by tools/persona_presets.ts to avoid circular deps.
    */
-  setPersona(config: PersonaConfig, block: string): void {
+  setPersona(config: PersonaConfig, block: string, supplement = ""): void {
+    this.personaSupplement = supplement;
     this.currentPersona = config;
-    this.context.setPersonaBlock(block);
+    this.context.setPersonaBlock([block, supplement].filter(Boolean).join("\n\n"));
     this.emitter.emit("persona_changed", {
       name: config.name,
       description: config.description,
@@ -2098,6 +2109,7 @@ export class AgentHarness {
    */
   resetPersona(): void {
     this.currentPersona = undefined;
+    this.personaSupplement = "";
     this.context.clearPersonaBlock();
     const p = this.config.persona;
     this.emitter.emit("persona_changed", {
@@ -2130,7 +2142,7 @@ export class AgentHarness {
     if (!shouldPersist || !this.config.persistRuntimePreferences || !this.runtimePreferences) {
       return { persisted: false };
     }
-    const out = await this.config.persistRuntimePreferences(this.runtimePreferences);
+    const out = await this.config.persistRuntimePreferences(this.runtimePreferences, normalized);
     return {
       persisted: true,
       ...(typeof out === "string" && out.length > 0 ? { path: out } : {}),
@@ -2591,16 +2603,18 @@ export class AgentHarness {
         channel: "trace",
       });
     }
-    if (merged.persona?.activeProfile && merged.persona?.controls) {
-      const nextProfile = applyPersonaControlsToProfile(
+    if (patch.persona && merged.persona?.activeProfile) {
+      // New profiles already contain their generated delivery. Only explicitly
+      // changed controls alter it; unrelated preference saves preserve the voice.
+      const nextProfile = patch.persona.activeProfile ? merged.persona.activeProfile : applyPersonaControlsToProfile(
         merged.persona.activeProfile,
-        merged.persona.controls
+        patch.persona.controls ?? {}
       );
       merged.persona.activeProfile = nextProfile;
       this.runtimePreferences = merged;
       this.config.runtimePreferences = merged;
       const block = buildRuntimePersonaBlock(nextProfile, merged.persona.controls);
-      this.setPersona(personaConfigFromRuntimeProfile(nextProfile), block);
+      this.setPersona(personaConfigFromRuntimeProfile(nextProfile), block, this.personaSupplement);
     }
   }
 
@@ -3155,7 +3169,7 @@ export class AgentHarness {
         ? await resolveUserTurnWithChatAttachments(
             conversationUserContentResolved,
             chatAttachments,
-            this.config.model
+            this.config.model,this.config.baseURL
           )
         : conversationUserContentResolved;
     const nativeVisionTurn =
@@ -3191,7 +3205,10 @@ export class AgentHarness {
     this.researchContinuationAttemptedThisSend = false;
     this.verificationMidNudgesThisSend = 0;
     this.distillArtifactNudgeThisSend = false;
+    this.taskCompletion = openingTurn ? null : new TaskCompletionLedger(userMessage,{previous:this.taskCompletion??undefined});
+    this.completionRecoveryAttempts = 0;
     this.context.clearTurnContext();
+    this.context.setTurnContext('saved_accounts',await savedAccountContext(userMessage).catch(()=>''));
     this.lastCompressionTimestampThisSend = 0;
     this.aconGuidelineAnalyzedThisSend = false;
     this.recallRewriteThisSend = null;
@@ -3834,7 +3851,7 @@ export class AgentHarness {
 
       this.context.append({ role: "user", content: userTurnContent });
 
-      // Lazy mode: text-only image attachments need vision_analyze; native-vision models get pixels on the main API.
+      // Local image loading is available without a secondary model.
       if (
         !openingTurn &&
         !nativeVisionTurn &&
@@ -3843,7 +3860,7 @@ export class AgentHarness {
           /\`\`\`attached_files\b/.test(conversationUserContentResolved) ||
           chatAttachments.length > 0)
       ) {
-        const visionToolNames = (["vision_analyze", "upload_image"] as const).filter((n) =>
+        const visionToolNames = (["upload_image"] as const).filter((n) =>
           this.registry.has(n)
         );
         if (visionToolNames.length > 0) {
@@ -4968,6 +4985,7 @@ export class AgentHarness {
   private buildHarnessMetrics(reason: TurnEndTerminationReason): TurnEndHarnessMetrics {
     return {
       terminationReason: reason,
+      ...(this.taskCompletion?.active ? {taskCompletion:{requested:this.taskCompletion.outcomes.length,completed:this.taskCompletion.outcomes.filter(x=>x.status==='completed').length,pending:this.taskCompletion.pending.length,blocked:this.taskCompletion.blocked.length,heldFinalReplies:this.completionRecoveryAttempts}}:{}),
       toolsInvokedThisSend: [...new Set(this.toolsUsedThisTurn)],
       spawnAgentCallsThisSend: this.toolsUsedThisTurn.filter((n) => n === "spawn_agent").length,
       parallelToolCallsLastBatch: this.lastParallelToolBatchSize,
@@ -5167,10 +5185,31 @@ export class AgentHarness {
 
   /** End a bounded run with an evidence-grounded handoff, never extra effects.
    * The termination remains round_cap; a summary is not proof of completion. */
+  /** No action tools or persisted nudges: fill an empty answer once, then stop. */
+  private async writeMissingFinalReply():Promise<void>{
+    const accumulator=new StreamAccumulator();
+    try{
+      const messages=await this.prepareMessagesForContextLimit([...await this.context.buildMessages(),{role:'system',content:USER_REPLY_FINALIZE_SYSTEM}],this.config.model,[]);
+      const stream=await this.streamWithRetry(messages,[],undefined,this._turnReasoningBudget,undefined,this._turnReasoningSurface);
+      for await(const chunk of withChunkTimeout(stream,()=>resolveStreamChunkTimeoutMs({baseURL:this.config.baseURL,reasoningEffort:this._turnReasoningBudget?.reasoningEffort??null,fileWriteSinkActive:false,largeToolArgInFlight:false}))){
+        this.currentTurnController?.signal.throwIfAborted();this.abortSignal?.throwIfAborted();accumulator.processChunk(chunk);
+      }
+      accumulator.finishInlineReasoning();
+    }catch(error){
+      if(this.abortSignal?.aborted||this.currentTurnController?.signal.aborted)throw error;
+    }
+    const reply=accumulator.accumulatedText.trim()||'Tool work has stopped. No final response was returned.';
+    this.context.appendMessage({role:'assistant',content:reply});
+    this.emitter.emit('text',{channel:'user',delta:reply});
+  }
+
   private async finalizeAtToolRoundLimit(requiredHandoff?: string): Promise<void> {
     if (this.abortSignal?.aborted || this.currentTurnController?.signal.aborted) {
       this.emitTurnEnd("error");
       return;
+    }
+    if(this.taskCompletion?.holdFinal){
+      const handoff=this.taskCompletion.handoff();this.context.appendMessage({role:'assistant',content:handoff});this.emitter.emit('text',{channel:'user',delta:handoff});this.emitTurnEnd('round_cap');return;
     }
     const handoffNotice: Message = { role: "system", content: "The tool-round budget is exhausted. No more tools are available. Give a brief final handoff from observed results: what was actually completed/verified, what remains incomplete, and any adoption or approval gap. Do not audit, plan more work, invent success or imply blocked checks passed." };
     this.emitter.emit("recovery_action", { strategy: "escalate", reason: "tool_round_budget", notes: "One tool-free handoff; termination remains round_cap" });
@@ -5681,6 +5720,7 @@ export class AgentHarness {
       });
     }
 
+    this.context.setTurnContext('task_completion',this.taskCompletion?.render()??'');
     let messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
     // ── Adaptive intent routing ───────────────────────────────────────────────
     // Cache the routing profile for the duration of this turn. Intent/model/maxTokens
@@ -5750,8 +5790,10 @@ export class AgentHarness {
       parseInt(resolveHarnessEnvRaw("AGENT_STREAM_MAX_RETRIES", this.runtimePreferences) ?? "3", 10) || 3
     );
 
-    const routingModel = routingProfile.applied ? routingProfile.modelSlug : undefined;
+    const hasImageInput=messages.some(message=>Array.isArray(message.content)&&message.content.some(part=>part.type==='image_url'));
+    const routingModel = routingProfile.applied && !hasImageInput ? routingProfile.modelSlug : undefined;
     const activeModelSlug = routingModel ?? this.config.model;
+    if(hasImageInput&&!await modelSupportsNativeVisionAsync(activeModelSlug,this.config.baseURL))messages=omitUnsupportedImagePixels(messages);
     this.emitContextSnapshot(tools, activeModelSlug);
     this.contextOverflowRecoveredThisRound = false;
     this.streamContextOverflowRecoveries = 0;
@@ -5769,7 +5811,8 @@ export class AgentHarness {
         async () => {
           messages = scrubMessagesSpecialTokens(await this.context.buildMessages());
           return this.prepareMessagesForContextLimit(messages, activeModelSlug, tools);
-        }
+        },
+        this.taskCompletion?.active&&!this.taskCompletion.configured&&tools.some(t=>t.function.name==='plan')?'plan':undefined
       );
     };
     let stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk>;
@@ -5800,6 +5843,14 @@ export class AgentHarness {
         throw err;
       }
     }
+    let bufferedCompletionText = '';
+    const publishCompletionText = (text:string) => {
+      if(this.taskCompletion?.holdFinal && !accumulator.accumulatedToolCalls.length) bufferedCompletionText += text;
+      else {
+        if(bufferedCompletionText){this.emitter.emit('text',{channel:'user',delta:bufferedCompletionText});bufferedCompletionText='';}
+        this.emitter.emit('text',{channel:'user',delta:text});
+      }
+    };
     let finishReason: string | null = null;
     let streamAttempt = 0;
     let receivedStreamChunk = false;
@@ -5826,7 +5877,7 @@ export class AgentHarness {
           assertTurnActive();
 
           const parsed = accumulator.processChunk(chunk);
-          this.pendingAssistantTextThisSend = accumulator.accumulatedText;
+          this.pendingAssistantTextThisSend = this.taskCompletion?.holdFinal&&!accumulator.accumulatedToolCalls.length ? '' : accumulator.accumulatedText;
           if (parsed.textDelta) inferenceLatencyTracker.markFirstText();
           if (
             parsed.textDelta ||
@@ -5837,6 +5888,7 @@ export class AgentHarness {
             inferenceLatencyTracker.markFirstToken();
           }
           emitProcessedStreamText(this.emitter, parsed, {
+            onUserText: publishCompletionText,
             reasoningSurface: this._turnReasoningSurface,
             onPseudoMarkup: () => {
               this.pseudoMarkupSuppressCountThisSend += 1;
@@ -5861,6 +5913,7 @@ export class AgentHarness {
                   },
                 ]
               : []);
+          if(toolCallDeltas.length&&bufferedCompletionText){this.emitter.emit('text',{channel:'user',delta:bufferedCompletionText});bufferedCompletionText='';}
           for (const streamDelta of toolCallDeltas) {
             await this.processToolCallStreamDelta(
               streamDelta,
@@ -5946,6 +5999,7 @@ export class AgentHarness {
           interruptedText.length > 0 || interruptedToolCalls.length > 0;
 
         accumulator.reset();
+        bufferedCompletionText = '';
         finishReason = null;
         receivedStreamChunk = false;
 
@@ -6010,6 +6064,7 @@ export class AgentHarness {
 
     assertTurnActive();
     emitProcessedStreamText(this.emitter, accumulator.finishInlineReasoning(), {
+      onUserText: publishCompletionText,
       reasoningSurface: this._turnReasoningSurface,
     });
 
@@ -6036,6 +6091,22 @@ export class AgentHarness {
 
     const toolCalls = accumulator.accumulatedToolCalls;
     assertTurnActive();
+    if(!toolCalls.length && this.taskCompletion?.needsReview){
+      this.pendingAssistantTextThisSend='';
+      if(this.completionRecoveryAttempts++<2 && round+1<(this.config.maxToolRoundsPerTurn??Infinity)){
+        this.registry.activate(['plan']);
+        this.context.appendMessage({role:'system',content:this.taskCompletion.render()+'\nThe final reply was held because these outcomes are unresolved. Complete only the missing work, or record actual blockers; reconcile existing evidence in one plan update. Do not restart or repeat successful steps.'});
+        await this.runReActLoop(round+1);return;
+      }
+      const handoff=this.taskCompletion.handoff();
+      this.context.appendMessage({role:'assistant',content:handoff});this.emitter.emit('text',{channel:'user',delta:handoff});this.emitTurnEnd('error');return;
+    }
+    if(!toolCalls.length && this.taskCompletion?.blocked.length){
+      this.completionRecoveryAttempts++;
+      const handoff=this.taskCompletion.handoff();
+      this.context.appendMessage({role:'assistant',content:handoff});this.emitter.emit('text',{channel:'user',delta:handoff});this.emitTurnEnd('error');return;
+    }
+    if(bufferedCompletionText){this.emitter.emit('text',{channel:'user',delta:bufferedCompletionText});bufferedCompletionText='';}
     const accumulatedText = accumulator.accumulatedText;
 
     const skipStreamContinuationsForIntro =
@@ -6798,7 +6869,10 @@ export class AgentHarness {
               const args = JSON.parse(tc.argsJson) as {
                 steps?: string[];
                 step_index?: number;
+                outcomes?:unknown;
+                updates?:unknown;
               };
+              if(args.outcomes!==undefined||args.updates!==undefined)continue;
               if (args.steps && args.steps.length > 0) {
                 this.context.patchEpistemicState({ subgoals: subgoalsFromPlanSteps(args.steps) });
                 if (this.executionState) {
@@ -6934,6 +7008,13 @@ export class AgentHarness {
           });
         }
         let content = result.ok ? result.output : `ERROR: ${result.error}`;
+        if(tc.name==='browser_credentials'&&result.ok){
+          try{const receipt=JSON.parse(result.output);if(receipt.available_in_new_chats===true&&receipt.account?.id)this.context.setTurnContext('saved_accounts',await savedAccountContext(this.lastUserMessage));}catch{/* Non-account receipts do not change saved account context. */}
+        }
+        const observationId=this.taskCompletion?.observe(tc.name,result.ok,result.ok?result.output:'');
+        if(observationId)content += '\nOBSERVATION_ID: '+observationId;
+        if(this.taskCompletion?.active){this.registry.activate(['plan']);this.context.setTurnContext('task_completion',this.taskCompletion.render());}
+
         if (result.ok && tc.name.startsWith("mcp_")) {
           try {
             const retainedView = await archiveLargeMcpOutput(tc.name, content);
@@ -7214,8 +7295,8 @@ export class AgentHarness {
     } else {
       // Text-only completion — end only when the model stops with a real answer.
       const openingTurn = this.sessionGreetingThisSend || this.personaBootstrapPromptThisSend;
-      const assistant = (this.context.getLastAssistantMessage() ?? "").trim();
-
+      const assistant = accumulatedText.trim();
+      const finalReviewEnabled=resolveHarnessEnvRaw('AGENT_VERIFY_BEFORE_DONE',this.runtimePreferences)==='1';
 
       const verificationGate = needsVerificationContinuation({
         userMessage: this.lastUserMessage,
@@ -7223,35 +7304,10 @@ export class AgentHarness {
         prefs: this.runtimePreferences,
         gateAttempted: this.verificationGateAttemptedThisSend,
       });
-      if (verificationGate.needed && !finishingSignature) {
+      if (finalReviewEnabled && verificationGate.needed && !finishingSignature) {
         this.verificationGateAttemptedThisSend = true;
         this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
         this.context.appendMessage({ role: "user", content: verificationGate.message });
-        await this.runReActLoop(round + 1);
-        return;
-      }
-
-      const webResearchEnabled =
-        resolveHarnessEnvRaw("AGENT_WEB_RESEARCH", this.runtimePreferences) !== "0";
-      const researchGate = needsResearchContinuation({
-        userMessage: this.lastUserMessage,
-        intent: this.turnInference?.intent,
-        freshnessSensitive: this.turnInference?.freshnessSensitive,
-        toolFirstBias: this.turnInference?.toolFirstBias,
-        toolsUsed: this.toolsUsedThisTurn,
-        summary: this._researchLedger.summary(),
-        pendingUrlSamples: this._researchLedger
-          .getPendingUrls()
-          .slice(0, 5)
-          .map((u) => (u.title ? `${u.title} — ${u.url}` : u.url)),
-        gateAttempted: this.researchContinuationAttemptedThisSend,
-        enabled: webResearchEnabled && !finishingSignature,
-        assistantText: assistant,
-      });
-      if (researchGate.needed) {
-        this.researchContinuationAttemptedThisSend = true;
-        this.ensureCapabilityToolPreseed(this.lastUserMessage, false);
-        this.context.appendMessage({ role: "user", content: researchGate.message });
         await this.runReActLoop(round + 1);
         return;
       }
@@ -7269,12 +7325,11 @@ export class AgentHarness {
         })
       ) {
         this.userReplyFinalizeAttempted = true;
-        this.context.appendMessage({ role: "user", content: CONTINUE_AFTER_TOOLS_MESSAGE });
-        await this.runReActLoop(round + 1);
-        return;
+        await this.writeMissingFinalReply();
       }
 
       assertTurnActive();
+      if(finalReviewEnabled){
       if (artifactInvestigation?.requiredReports.length) {
         const reportVerification = await artifactInvestigation.verifyReports();
         assertTurnActive();
@@ -7326,6 +7381,7 @@ export class AgentHarness {
         this.emitter.emit("text", {channel: "user", delta: `\n\n${incomplete}`});
         this.emitTurnEnd("error");
         return;
+      }
       }
       // Per-turn outcome score (used by summary + root-only learning paths).
       const turnOutcome = scoreTurnOutcome({
@@ -7463,7 +7519,8 @@ export class AgentHarness {
     reasoningBudget?: ReasoningBudget | null,
     streamAbort?: AbortController,
     reasoningSurface: ReasoningSurface = "native",
-    rebuildMessagesAfterOverflow?: () => Promise<Message[]>
+    rebuildMessagesAfterOverflow?: () => Promise<Message[]>,
+    requiredTool?: string
   ): Promise<Stream<OpenAI.Chat.Completions.ChatCompletionChunk>> {
     let lastErr: unknown;
     const retryStartedAt = Date.now();
@@ -7560,7 +7617,7 @@ export class AgentHarness {
         stream_options: { include_usage: true },
         ...(maxCompletionTokens !== undefined && { max_tokens: maxCompletionTokens }),
         ...(useTools && { tools }),
-        ...(useToolChoice && { tool_choice: "auto" as const }),
+        ...(useToolChoice && { tool_choice: requiredTool ? {type:'function' as const,function:{name:requiredTool}} : 'auto' as const }),
         ...orExtras,
         ...fusionExtras,
         ...reasoningParam,

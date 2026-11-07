@@ -57,3 +57,7 @@ test("buildNativeVisionUserContent produces text and image_url parts", async () 
   assert.equal(parts[0]?.type, "text");
   assert.equal(parts[1]?.type, "image_url");
 });
+
+test('DeepSeek 1017 sends native images without a vision service',()=>{
+ assert.equal(modelSupportsNativeVision('deepseek/deepseek-v4.1-flash-1017'),true);
+});

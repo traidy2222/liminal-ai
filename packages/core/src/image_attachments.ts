@@ -1,5 +1,5 @@
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions.js";
-import { buildNativeVisionUserContent, modelSupportsNativeVision } from "./native_vision.js";
+import { buildNativeVisionUserContent, modelSupportsNativeVisionAsync } from "./native_vision.js";
 
 export type ImageAttachmentSource = "clipboard" | "drop" | "path" | "command";
 
@@ -115,10 +115,11 @@ export type UserTurnContent = string | ChatCompletionContentPart[];
 export async function resolveUserTurnWithAttachments(
   message: string,
   attachments: ImageAttachment[],
-  modelSlug: string
+  modelSlug: string,
+  baseURL?:string
 ): Promise<UserTurnContent> {
   if (attachments.length === 0) return message.trim();
-  if (modelSupportsNativeVision(modelSlug)) {
+  if (await modelSupportsNativeVisionAsync(modelSlug,baseURL)) {
     return buildNativeVisionUserContent(message, attachments);
   }
   return buildMessageWithImageAttachments(message, attachments);
@@ -138,13 +139,10 @@ export function buildMessageWithImageAttachments(message: string, attachments: I
     lines.push(`  size_bytes: ${item.sizeBytes}`);
     lines.push(`  source: ${item.source}`);
     if (item.filePath) lines.push(`  path: ${item.filePath}`);
-    if (item.dataUrl) lines.push(`  data_url: ${item.dataUrl}`);
   });
   lines.push("```");
   lines.push(
-    "VISUAL PERCEPTION: The primary chat model does not receive these pixels as built-in vision; the block above is text. " +
-      "To actually see the image, call vision_analyze with the same path or data_url from this block and a concrete prompt (e.g. describe layout, read text, identify objects). " +
-      "If vision_analyze is not in your tool list yet (lazy loading), call activate_tool_family({ family: \"vision\" }) first, then vision_analyze."
+    "IMAGE_INPUT_UNAVAILABLE: The selected chat model has no confirmed native image support. This is attachment metadata, not image pixels. Select an image-capable chat model to inspect the image; no separate vision model is called."
   );
   return lines.join("\n");
 }

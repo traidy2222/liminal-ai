@@ -22,7 +22,7 @@ export async function bootstrapIda(
   if (!autoConnect || !idaMcpEnabled() || !idaConnectOnBoot()) return;
   const existing = await readConnection(IDA_MCP_CONNECTION_NAME);
   if (existing?.kind === "mcp") return;
-  const result = await connectIdaMcp(registry);
+  const result = await connectIdaMcp(registry, { autoActivate: !registry.isLazyToolLoading() });
   if (!result.ok) {
     throw new Error(result.error);
   }

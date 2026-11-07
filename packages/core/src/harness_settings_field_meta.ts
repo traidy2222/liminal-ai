@@ -48,7 +48,7 @@ export const HARNESS_SETTINGS_SUBGROUP_LABELS: Record<
 > = {
   models_api: {
     routing: "Routing & primary models",
-    vision: "Vision sidecar",
+    vision: "Native images",
     memory_models: "Memory helper models",
     persona_models: "Persona generation",
     streaming: "Streaming & wall clocks",
@@ -117,7 +117,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "User reply finalize",
     description:
-      "When on, runs one extra tool-free completion if tools ran but the visible reply was very short (common after read/edit turns). Turn off for lower latency.",
+      "When on, fills a completely empty reply once using existing tool results, without tools. Any non-empty final answer stops immediately.",
     valueKind: "boolean",
   },
   "AGENT_VAULT_AUTO_WRITE": {
@@ -230,48 +230,6 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     subgroupId: "harness_misc",
     label: "Provider Circuit Cooldown Ms",
     description: "Harness environment toggle for Provider Circuit Cooldown Ms. See docs/configuration.md (harness).",
-    valueKind: "number",
-  },
-  "AGENT_VISION_MODEL": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Model",
-    description: "Harness environment toggle for Vision Model. See docs/configuration.md (models api).",
-    valueKind: "string",
-  },
-  "AGENT_VISION_BASE_URL": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Base Url",
-    description: "Harness environment toggle for Vision Base Url. See docs/configuration.md (models api).",
-    valueKind: "string",
-  },
-  "AGENT_VISION_TIMEOUT_MS": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Timeout Ms",
-    description: "Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api).",
-    valueKind: "number",
-  },
-  "AGENT_VISION_MAX_IMAGE_BYTES": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Max Image Bytes",
-    description: "Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api).",
-    valueKind: "number",
-  },
-  "AGENT_VISION_RETRIES": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Retries",
-    description: "Harness environment toggle for Vision Retries. See docs/configuration.md (models api).",
-    valueKind: "number",
-  },
-  "AGENT_VISION_RETRY_BASE_MS": {
-    tabId: "models_api",
-    subgroupId: "vision",
-    label: "Vision Retry Base Ms",
-    description: "Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api).",
     valueKind: "number",
   },
   "AGENT_TRANSCRIBE_ENABLED": {
@@ -926,9 +884,9 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
   "AGENT_VERIFY_BEFORE_DONE": {
     tabId: "harness",
     subgroupId: "self_heal",
-    label: "Proactive verify (legacy key)",
+    label: "Additional final review",
     description:
-      "Deprecated — use AGENT_PROACTIVE_VERIFY. When on, verification runs after edit/browser batches, not at turn end.",
+      "Opt-in final verification and artifact review. Off by default: a completed answer ends the turn without another review round.",
     valueKind: "boolean",
   },
   "AGENT_VERIFY_BEFORE_DONE_AUTO_LINT": {
@@ -951,7 +909,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "harness",
     subgroupId: "self_heal",
     label: "Proactive lint after edits",
-    description: "Auto run_lint on changed typed files after each edit batch (default on).",
+    description: "Opt-in automatic lint after changed typed files. Off by default.",
     valueKind: "boolean",
   },
   "AGENT_OPENROUTER_FUSION_PRESET": {
@@ -2652,7 +2610,7 @@ const _META_RAW: Record<string, HarnessSettingsFieldMeta> = {
     tabId: "models_api",
     subgroupId: "vision",
     label: "Native vision (main model)",
-    description: "Set 0 to disable routing image attachments as image_url parts on the main chat model.",
+    description: "Send image attachments and resulting browser viewports directly to the selected chat model. Password fields in browser viewports are masked. No separate vision model or request. Set 0 for text/accessibility-only browser observations.",
     valueKind: "boolean",
   },
   "AGENT_NATIVE_VISION_SLUGS": {

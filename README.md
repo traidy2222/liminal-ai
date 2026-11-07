@@ -19,7 +19,7 @@ Run it on your machine through a native desktop app, a browser, or your terminal
 
 Liminal connects a model to the tools it needs to do useful work: read and edit files, run commands, search the web, create documents, and work with connected services. Its agent loop handles tool execution, approvals, retries, context management, and persistent memory.
 
-**Release status:** Liminal is in beta. The [0.1.27 release notes](CHANGELOG.md) cover persistent per-chat browsing, cloud or local first-run setup, value-based provider routing with cache telemetry, desktop wake conversations, and experimental verified procedures. Download published installers from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases). Screenshots show the application with demo workspace data.
+**Release status:** Liminal is in beta. The [0.1.28 changelog](CHANGELOG.md) covers native visual browsing, account and credential continuity, evidence-backed completion tracking, simpler persona setup, chronological conversations, and shorter streamed narration. Download published installers from [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases). Screenshots show the application with demo workspace data.
 
 ## Why Liminal
 

@@ -57,10 +57,12 @@ export class VoiceTextStream {
           if (this.first || boundary >= limit) break;
         }
       }
-      if (!end && this.buffer.length > limit) {
+      // A long first sentence or final flush must obey the same clip bound.
+      // Otherwise one unbroken narration paragraph becomes a slow synthesis job.
+      if ((!end || end > limit) && this.buffer.length > limit) {
         const prefix = this.buffer.slice(0, limit);
         const clause = Math.max(prefix.lastIndexOf(', '), prefix.lastIndexOf('; '), prefix.lastIndexOf(': '));
-        end = clause >= 60 ? clause + 1 : prefix.lastIndexOf(' ');
+        end = clause >= 60 ? clause + 1 : Math.max(prefix.lastIndexOf(' '), 0) || limit;
       }
       if (fence > 0 && (!end || fence < end)) end = fence;
       if (!end && final) end = this.buffer.length;

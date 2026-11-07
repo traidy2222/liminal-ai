@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  providerConnectionConfigured,validateProviderSetup,persistValidatedProvider,
+  providerSetupVerified,providerConnectionConfigured,validateProviderSetup,persistValidatedProvider,
   buildHarnessSettingsApiFields,
   HARNESS_SETTINGS_TABS,
   HARNESS_MANAGED_ENV_KEY_SET,
@@ -38,6 +38,7 @@ import { applyApiKeyToProcess, firstApiKeyFromEnv, writeEnvMerge } from "./env_f
 
 export interface DesktopConfigSnapshot {
   apiKeyConfigured: boolean;
+  providerVerified?: boolean;
   personaBootstrapEnabled: boolean;
   personaBootstrapPending: boolean;
   personaBootstrapAllowSkip: boolean;
@@ -110,6 +111,7 @@ export async function buildDesktopConfig(
     providerConnectionConfigured(cfg.openRouterApiKey);
   return {
     apiKeyConfigured,
+    providerVerified: await providerSetupVerified({baseURL:cfg.baseURL,model:cfg.model,apiKey:cfg.openRouterApiKey}),
     personaBootstrapEnabled: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP", prefs) !== "0",
     personaBootstrapPending: bridge.isAwaitingPersonaBootstrap,
     personaBootstrapAllowSkip: resolveHarnessEnvRaw("AGENT_PERSONA_BOOTSTRAP_ALLOW_SKIP", prefs) !== "0",

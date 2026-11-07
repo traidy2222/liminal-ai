@@ -85,6 +85,12 @@ test('cancellation stops active synthesis and drops queued sentences', async () 
   assert.equal(cancelled, true); assert.equal(spoken.length, 1);
 });
 
+test('long narration sentences and tool-boundary flushes stay bounded without losing prose',async()=>{
+ const spoken:string[]=[],text='A detailed browser narration with enough context to explain the next useful action '.repeat(15).trim()+'.';
+ const stream=new VoiceTextStream(async chunk=>{spoken.push(chunk);},assert.fail,10000);
+ stream.push(text);await stream.finish();assert.ok(spoken.length>4);assert.ok(spoken.every(chunk=>chunk.length<=240));assert.ok(spoken[0]!.length<=100);assert.equal(spoken.join(' '),text);
+});
+
 test('code fences split across provider deltas are never read aloud', async () => {
   const spoken: string[] = [];
   const stream = new VoiceTextStream(async text => {spoken.push(text);}, assert.fail);

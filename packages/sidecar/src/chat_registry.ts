@@ -20,6 +20,7 @@ import {
   runWithWorkspaceRoot,
   saveLastActiveChatId,
   saveRuntimePreferences,
+  patchSavedRuntimePreferences,
   touchChatMetadata,
   workspaceFingerprint,
   type ChatKind,
@@ -99,7 +100,8 @@ export class ChatRegistry {
 
   async reloadRuntimePrefs(): Promise<void> {
     const root = this.deps.repoRoot.trim() || resolveWorkspaceRoot();
-    this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null);
+    this.cachedRuntimePrefs = await loadRuntimePreferences(root).catch(() => null) ?? this.cachedRuntimePrefs;
+    this.deps.runtimePreferences=this.cachedRuntimePrefs;
   }
 
   /** Persist prefs to disk and sync the registry + open harness snapshots. */
@@ -108,13 +110,11 @@ export class ChatRegistry {
     repoRoot?: string
   ): Promise<RuntimePreferences> {
     const root = repoRoot?.trim() || this.deps.repoRoot.trim() || resolveWorkspaceRoot();
-    const merged = mergeRuntimePreferences(this.cachedRuntimePrefs, patch);
-    await saveRuntimePreferences(merged, root);
+    const {preferences:merged}=await patchSavedRuntimePreferences(patch,root);
     this.cachedRuntimePrefs = merged;
     this.deps.runtimePreferences = merged;
     for (const slot of this.slots.values()) {
-      if (slot.bridge.harness.getIsRunning()) continue;
-      await slot.bridge.harness.patchRuntimePreferences(patch, { persist: false });
+      await slot.bridge.synchronizePreferences(merged);
     }
     return merged;
   }
@@ -181,8 +181,12 @@ export class ChatRegistry {
   }
 
   private async openBridgeFromMeta(meta: ChatMetadata): Promise<SessionBridge> {
+    await this.reloadRuntimePrefs();
     const existing = this.slots.get(meta.chatId);
-    if (existing) return existing.bridge;
+    if (existing) {
+      if(this.cachedRuntimePrefs)await existing.bridge.synchronizePreferences(this.cachedRuntimePrefs);
+      return existing.bridge;
+    }
 
     const { provider } = this.deps;
     const runtimePreferences = this.cachedRuntimePrefs;
@@ -199,8 +203,9 @@ export class ChatRegistry {
         maxToolRoundsPerTurn: isOrchestrator ? 48 : 128,
         workingStateEnabled: true,
         runtimePreferences,
-        persistRuntimePreferences: async (prefs) =>
-          saveRuntimePreferences(prefs, workspaceRoot),
+        persistRuntimePreferences: async (prefs,patch) => {
+          await this.applyRuntimePreferencesPatch(patch??prefs,workspaceRoot);
+        },
         context: {
           modelMaxTokens: 128_000,
           thresholdFraction: 0.6,
@@ -225,19 +230,6 @@ export class ChatRegistry {
         const orch = this.getOrchestrator?.();
         if (orch) {
           registerOrchestratorChatTools(harness.registry, orch, meta.chatId);
-        }
-        if (!harness.isPersonaBootstrapCompleted()) {
-          await installDefaultPersonaArtifacts(harness);
-          await harness.patchRuntimePreferences(
-            {
-              persona: {
-                bootstrapCompleted: true,
-                sourcePrompt: "Mission Control",
-                updatedAt: Date.now(),
-              },
-            },
-            { persist: true }
-          );
         }
       } else {
         const persisted = harness.getPersistedPersonaProfile();
@@ -268,7 +260,8 @@ export class ChatRegistry {
       this.diskMetas = this.diskMetas.map(saved => saved.chatId === updated.chatId ? updated : saved);
       this.deps.sink(serverFrame("chat_list", this.chatListPayload()));
     };
-    void bridge.beginSession().then(() => this.deps.sink(serverFrame("chat_list", this.chatListPayload())));
+    await bridge.beginSession();
+    this.deps.sink(serverFrame("chat_list", this.chatListPayload()));
     return bridge;
   }
 

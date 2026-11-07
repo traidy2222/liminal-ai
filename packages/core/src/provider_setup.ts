@@ -1,6 +1,6 @@
 import {readFile,mkdir,writeFile,rename} from 'node:fs/promises';
 import path from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {isIP} from 'node:net';
 import {globalPath} from './global_storage.js';
 import {resolveProviderConfig} from './provider_config.js';
@@ -32,9 +32,9 @@ export function normalizeProviderSetup(input:ProviderSetupInput){
  if(!apiKey&&isLocalProviderUrl(baseURL))apiKey='liminal-local';
  return {baseURL,model,apiKey,local:isLocalProviderUrl(baseURL)};
 }
-async function request(baseURL:string,route:string,key:string,body?:unknown){
+async function request(baseURL:string,route:string,key:string,body?:unknown,signal?:AbortSignal){
  let response:Response;
- try{response=await fetch(baseURL+route,{method:body?'POST':'GET',headers:{...(key?{Authorization:'Bearer '+key}:{}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(body?45000:10000)});}catch{throw Error('Cannot reach the model server. Check the endpoint and start/load your local server if needed.');}
+ try{response=await fetch(baseURL+route,{method:body?'POST':'GET',headers:{...(key?{Authorization:'Bearer '+key}:{}),'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:signal?AbortSignal.any([signal,AbortSignal.timeout(body?45000:10000)]):AbortSignal.timeout(body?45000:10000)});}catch(error){if(signal?.aborted)throw signal.reason;throw Error('Cannot reach the model server. Check the endpoint and start/load your local server if needed.');}
  if(!response.ok)throw Error(response.status===401||response.status===403?'The provider rejected these credentials. Check your API key.':response.status===402?'The provider requires credits before it can run this model.':`The provider returned HTTP ${response.status}. Check the selected model and endpoint.`);
  try{return await response.json() as any;}catch{throw Error('The endpoint did not return an OpenAI-compatible response.');}
 }
@@ -44,11 +44,11 @@ export async function discoverProviderModels(input:ProviderSetupInput){
  if(!models.length)throw Error('No models are available. Load a model in your local server, then refresh.');
  return {models,local:cfg.local};
 }
-export async function validateProviderSetup(input:ProviderSetupInput){
+export async function validateProviderSetup(input:ProviderSetupInput,signal?:AbortSignal){
  const cfg=normalizeProviderSetup(input);
  if(!cfg.model)throw Error('Select or enter a model.');
  if(!cfg.local&&!cfg.apiKey)throw Error('Enter your cloud provider API key.');
- const data=await request(cfg.baseURL,'/chat/completions',cfg.apiKey,{model:cfg.model,messages:[{role:'user',content:'Call connection_check with ready=true.'}],tools:[{type:'function',function:{name:'connection_check',description:'Confirm this model can call tools.',parameters:{type:'object',properties:{ready:{type:'boolean'}},required:['ready'],additionalProperties:false}}}],tool_choice:{type:'function',function:{name:'connection_check'}},max_tokens:256,stream:false});
+ const data=await request(cfg.baseURL,'/chat/completions',cfg.apiKey,{model:cfg.model,messages:[{role:'user',content:'Call connection_check with ready=true.'}],tools:[{type:'function',function:{name:'connection_check',description:'Confirm this model can call tools.',parameters:{type:'object',properties:{ready:{type:'boolean'}},required:['ready'],additionalProperties:false}}}],tool_choice:{type:'function',function:{name:'connection_check'}},max_tokens:256,stream:false},signal);
  const call=data.choices?.[0]?.message?.tool_calls?.find((c:any)=>c.function?.name==='connection_check');
  let ready=false;try{ready=JSON.parse(call?.function?.arguments??'{}').ready===true;}catch{}
  if(!ready)throw Error('The model responded but did not complete the tool-call check. Choose a tool-capable model.');
@@ -66,5 +66,31 @@ export async function persistValidatedProvider(cfg:Awaited<ReturnType<typeof val
    Object.assign(process.env,values);
   });credentialWrite=save;await save;
  }
+ await recordProviderVerification(cfg);
  return {provider:{baseURL:cfg.baseURL,model:cfg.model,inferenceMode:'byok'},harness:{env:{AGENT_INFERENCE_MODE:'byok',AGENT_INFERENCE_PREFER_MANAGED:'0',AGENT_API_BASE_URL:cfg.baseURL,AGENT_MODEL:cfg.model,AGENT_SINGLE_MODEL:'1',AGENT_FAST_MODEL:cfg.model,AGENT_PERSONA_INFER_MODEL:cfg.model}}};
+}
+
+
+function verificationFingerprint(input:ProviderSetupInput):string {
+ const cfg=normalizeProviderSetup(input);
+ return createHash('sha256').update(JSON.stringify([cfg.baseURL,cfg.model,cfg.apiKey])).digest('hex');
+}
+export async function providerSetupVerified(input:ProviderSetupInput):Promise<boolean>{
+ try {
+  const record=JSON.parse(await readFile(globalPath('provider_verification.json'),'utf8'));
+  return record.version===1&&record.fingerprint===verificationFingerprint(input);
+ } catch {return false;}
+}
+async function recordProviderVerification(input:ProviderSetupInput):Promise<void>{
+ const target=globalPath('provider_verification.json');await mkdir(path.dirname(target),{recursive:true});
+ const temp=target+'.'+randomUUID()+'.tmp';
+ await writeFile(temp,JSON.stringify({version:1,fingerprint:verificationFingerprint(input),verifiedAt:Date.now()}),{mode:0o600});
+ await rename(temp,target);
+}
+export async function ensureProviderSetupVerified(input:ProviderSetupInput,signal?:AbortSignal):Promise<void>{
+ signal?.throwIfAborted();
+ if(await providerSetupVerified(input))return;
+ const cfg=await validateProviderSetup(input,signal);
+ signal?.throwIfAborted();
+ await recordProviderVerification(cfg);
 }

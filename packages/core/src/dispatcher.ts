@@ -125,6 +125,7 @@ function validateArgs(
   schema: ToolParameterSchema,
   args: Record<string, unknown>
 ): string | null {
+  if(schema.anyOf?.length){const variant=validateValue('arguments',args,{anyOf:schema.anyOf});if(variant)return variant;}
   // Required fields
   for (const field of schema.required ?? []) {
     if (!(field in args)) {

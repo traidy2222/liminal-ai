@@ -4,6 +4,7 @@ const owner=new AsyncLocalStorage<string>();
 const pending=new Map<string,Promise<void>>();
 const active=new Set<string>();
 export function browserTaskIsActive(taskId:string){return active.has(taskId);}
+export function isCurrentBrowserTask(taskId:string){return owner.getStore()===taskId;}
 
 /** Selected tabs are mutable chat state. Nested tool helpers share the same turn. */
 export async function withBrowserTask<T>(taskId:string,action:()=>Promise<T>):Promise<T>{

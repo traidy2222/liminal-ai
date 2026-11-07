@@ -219,7 +219,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_MISSION_MAX_ITERATIONS` | `20` | yes | no | harness | Harness environment toggle for Mission Max Iterations. See docs/configuration.md (harness). |
 | `AGENT_MISSION_REQUIRES_YOLO` | `0` | yes | no | harness | When 1, mission_continue chained sends require AGENT_YOLO=1. Default 0 allows continuation with normal approval gates. |
 | `AGENT_MODEL` | `deepseek/deepseek-v4-pro` | yes | no | models_api | Harness environment toggle for Model. See docs/configuration.md (models api). |
-| `AGENT_NATIVE_VISION` | `1` | yes | no | models_api | Set 0 to disable routing image attachments as image_url parts on the main chat model. |
+| `AGENT_NATIVE_VISION` | `1` | yes | no | models_api | Send image attachments and resulting browser viewports directly to the selected chat model. Password fields in browser v |
 | `AGENT_NATIVE_VISION_SLUGS` | `` | yes | no | models_api | Comma-separated substrings; when AGENT_MODEL matches, attachments use native multimodal input. |
 | `AGENT_OBSIDIAN_DISCOVER` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Discover. See docs/configuration.md (memory vault). |
 | `AGENT_OBSIDIAN_REQUIRE_DOT_OBSIDIAN` | `1` | yes | no | memory_vault | Harness environment toggle for Obsidian Require Dot Obsidian. See docs/configuration.md (memory vault). |
@@ -231,7 +231,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_OPENROUTER_SESSIONS` | `1` | yes | no | session_ui | Harness environment toggle for Openrouter Sessions. See docs/configuration.md (session ui). |
 | `AGENT_OPENROUTER_SESSION_ID` | `` | yes | no | session_ui | Harness environment toggle for Openrouter Session Id. See docs/configuration.md (session ui). |
 | `AGENT_OUTCOME_IMPLICIT_FEEDBACK` | `1` | yes | no | advanced | Defer effort/rule/recipe learning until the user's next message. Corrections and retries lower the prior turn score; tha |
-| `AGENT_OUTCOME_JUDGE` | `1` | yes | no | advanced | Sample a fraction of turns for a fast-model answer-quality score to calibrate heuristic outcomes. |
+| `AGENT_OUTCOME_JUDGE` | `0` | yes | no | advanced | Sample a fraction of turns for a fast-model answer-quality score to calibrate heuristic outcomes. |
 | `AGENT_OUTCOME_JUDGE_SAMPLE_RATE` | `0.1` | yes | no | advanced | Fraction of deferred turns (0–1) sent to the fast outcome judge. Default 0.1 (10%). |
 | `AGENT_OVERINFERENCE_GUARD` | `1` | yes | no | harness | Harness environment toggle for Overinference Guard. See docs/configuration.md (harness). |
 | `AGENT_OVERINFERENCE_LLM_CHECK` | `0` | yes | no | harness | Harness environment toggle for Overinference Llm Check. See docs/configuration.md (harness). |
@@ -249,12 +249,12 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_PERSONA_INFER_MODEL` | `` | yes | no | models_api | Harness environment toggle for Persona Infer Model. See docs/configuration.md (models api). |
 | `AGENT_PERSONA_PREVIEW_MAX_CHARS` | `16000` | yes | no | harness | Harness environment toggle for Persona Preview Max Chars. See docs/configuration.md (harness). |
 | `AGENT_PERSONA_REPAIR_MAX` | `1` | yes | no | harness | Harness environment toggle for Persona Repair Max. See docs/configuration.md (harness). |
-| `AGENT_PERSONA_SOUL_MODE` | `batch` | yes | no | harness | Harness environment toggle for Persona Soul Mode. See docs/configuration.md (harness). |
-| `AGENT_PERSONA_UI_COPY` | `1` | yes | no | harness | Generate in-voice interface microcopy at persona bootstrap (composer placeholder, labels, empty state). Set 0 to use def |
-| `AGENT_PERSONA_UI_THEME_LLM` | `1` | yes | no | harness | Harness environment toggle for Persona Ui Theme Llm. See docs/configuration.md (harness). |
+| `AGENT_PERSONA_SOUL_MODE` | `scaffold` | yes | no | harness | Harness environment toggle for Persona Soul Mode. See docs/configuration.md (harness). |
+| `AGENT_PERSONA_UI_COPY` | `0` | yes | no | harness | Generate in-voice interface microcopy at persona bootstrap (composer placeholder, labels, empty state). Set 0 to use def |
+| `AGENT_PERSONA_UI_THEME_LLM` | `0` | yes | no | harness | Harness environment toggle for Persona Ui Theme Llm. See docs/configuration.md (harness). |
 | `AGENT_PLUGIN_DIR` | `` | yes | no | advanced | Harness environment toggle for Plugin Dir. See docs/configuration.md (advanced). |
-| `AGENT_PROACTIVE_VERIFY` | `1` | yes | no | harness | After file edits or browser tools, inject lint/console [VERIFY RESULT] into context before the next model round (no turn |
-| `AGENT_PROACTIVE_VERIFY_LINT` | `1` | yes | no | harness | Auto run_lint on changed typed files after each edit batch (default on). |
+| `AGENT_PROACTIVE_VERIFY` | `0` | yes | no | harness | After file edits or browser tools, inject lint/console [VERIFY RESULT] into context before the next model round (no turn |
+| `AGENT_PROACTIVE_VERIFY_LINT` | `0` | yes | no | harness | Opt-in automatic lint after changed typed files. Off by default. |
 | `AGENT_PROCESS_HEALTH` | `0` | yes | no | advanced | Harness environment toggle for Process Health. See docs/configuration.md (advanced). |
 | `AGENT_PROMPT_CACHE` | `1` | yes | no | harness | Harness environment toggle for Prompt Cache. See docs/configuration.md (harness). |
 | `AGENT_PROMPT_CACHE_ROLLING` | `1` | yes | no | harness | Harness environment toggle for Prompt Cache Rolling. See docs/configuration.md (harness). |
@@ -350,7 +350,7 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_TTS_VOICE` | `af_sky` | yes | no | harness | Cloud voice preset. JARVIS Warm always uses its bundled original-pitch voice profile. |
 | `AGENT_UI_VERBOSITY` | `normal` | yes | yes | session_ui | Harness environment toggle for Ui Verbosity. See docs/configuration.md (session ui). |
 | `AGENT_UPSTREAM_429_SUGGESTED_WAIT_MS` | `` | yes | no | models_api | Harness environment toggle for Upstream 429 Suggested Wait Ms. See docs/configuration.md (models api). |
-| `AGENT_USER_REPLY_FINALIZE` | `0` | yes | yes | harness | When on, runs one extra tool-free completion if tools ran but the visible reply was very short (common after read/edit t |
+| `AGENT_USER_REPLY_FINALIZE` | `1` | yes | yes | harness | When on, fills a completely empty reply once using existing tool results, without tools. Any non-empty final answer stop |
 | `AGENT_VAULT_AGENT_PREFIX` | `_liminal` | yes | no | memory_vault | Subfolder for agent-owned spine/raw/archive (default _liminal). Human notes outside this path are not auto-edited. |
 | `AGENT_VAULT_AUTO_WRITE` | `research` | yes | yes | memory_vault | Harness environment toggle for Vault Auto Write. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_CURATE_INTERVAL_MS` | `600000` | yes | no | memory_vault | Minimum ms between background vault_curate runs (default 600000). |
@@ -360,16 +360,10 @@ Web **Settings** writes to (2). See [Configuration basics](../start/configuratio
 | `AGENT_VAULT_PATH` | `` | yes | no | memory_vault | Harness environment toggle for Vault Path. See docs/configuration.md (memory vault). |
 | `AGENT_VAULT_REQUIRE_LINKS` | `1` | yes | no | memory_vault | Require at least one [[wikilink]] on agent vault_write calls (vault_ingest always weaves links). |
 | `AGENT_VAULT_WRITE_BUDGET` | `8` | yes | no | memory_vault | Harness environment toggle for Vault Write Budget. See docs/configuration.md (memory vault). |
-| `AGENT_VERIFY_BEFORE_DONE` | `1` | yes | no | harness | Deprecated — use AGENT_PROACTIVE_VERIFY. When on, verification runs after edit/browser batches, not at turn end. |
-| `AGENT_VERIFY_BEFORE_DONE_AUTO_LINT` | `1` | yes | no | harness | Deprecated — use AGENT_PROACTIVE_VERIFY_LINT. Auto run_lint after edit batches when proactive verify is on. |
+| `AGENT_VERIFY_BEFORE_DONE` | `0` | yes | no | harness | Opt-in final verification and artifact review. Off by default: a completed answer ends the turn without another review r |
+| `AGENT_VERIFY_BEFORE_DONE_AUTO_LINT` | `0` | yes | no | harness | Deprecated — use AGENT_PROACTIVE_VERIFY_LINT. Auto run_lint after edit batches when proactive verify is on. |
 | `AGENT_VERIFY_TOOLS` | `0` | yes | no | harness | When 1, verify_result and critic tools spawn verification sub-agents. Default 0 — skips them for faster turn completion. |
 | `AGENT_VIREON_SITE_URL` | `https://www.vireondynamics.com` | yes | no | harness | Harness environment toggle for Vireon Site Url. See docs/configuration.md (harness). |
-| `AGENT_VISION_BASE_URL` | `https://openrouter.ai/api/v1` | yes | no | models_api | Harness environment toggle for Vision Base Url. See docs/configuration.md (models api). |
-| `AGENT_VISION_MAX_IMAGE_BYTES` | `4194304` | yes | no | models_api | Harness environment toggle for Vision Max Image Bytes. See docs/configuration.md (models api). |
-| `AGENT_VISION_MODEL` | `nvidia/nemotron-nano-12b-v2-vl:free` | yes | no | models_api | Harness environment toggle for Vision Model. See docs/configuration.md (models api). |
-| `AGENT_VISION_RETRIES` | `2` | yes | no | models_api | Harness environment toggle for Vision Retries. See docs/configuration.md (models api). |
-| `AGENT_VISION_RETRY_BASE_MS` | `800` | yes | no | models_api | Harness environment toggle for Vision Retry Base Ms. See docs/configuration.md (models api). |
-| `AGENT_VISION_TIMEOUT_MS` | `45000` | yes | no | models_api | Harness environment toggle for Vision Timeout Ms. See docs/configuration.md (models api). |
 | `AGENT_WAKE_WORD_ENABLED` | `0` | yes | no | session_ui | Desktop: listen locally while Liminal is open, including minimized. Wake requests go to Mission Control. Enable spoken r |
 | `AGENT_WAKE_WORD_IDLE_SECONDS` | `45` | yes | no | session_ui | Return to wake listening after this much quiet time. Follow-ups need no wake phrase while awake. Agent replies and playb |
 | `AGENT_WAKE_WORD_PHRASE` | `Hey Jarvis` | yes | no | session_ui | Say this phrase first, followed by your request, or pause and give your request next. Default: Hey Jarvis. Use a distinc |

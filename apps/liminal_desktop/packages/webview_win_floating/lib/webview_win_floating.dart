@@ -441,6 +441,16 @@ class WinWebViewController {
   late Offset _lastLayoutOffset;
   late Size _lastLayoutSize;
   late double _lastDevicePixelRatio;
+  bool _hasLayoutBounds = false;
+  bool _renderWhenHidden = false;
+  bool _requestedVisible = true;
+
+  /// Agent tabs need compositor frames even without a mounted browser panel.
+  /// Keep the controller visible offscreen instead of disabling its renderer.
+  Future<void> enableBackgroundRendering() async {
+    _renderWhenHidden = true;
+    await setVisibility(false);
+  }
   Future<void> _updateBounds(
     Offset offset,
     Size size,
@@ -453,6 +463,8 @@ class WinWebViewController {
       _lastLayoutOffset = offset;
       _lastLayoutSize = size;
       _lastDevicePixelRatio = devicePixelRatio;
+      _hasLayoutBounds = true;
+      if (_renderWhenHidden && !_requestedVisible) return;
       // NOTE: DO NOT update webview bounds when fullscreen
       await _initFuture;
       await WebviewWinFloatingPlatform.instance.updateBounds(
@@ -468,6 +480,19 @@ class WinWebViewController {
     if (_disposed) return;
     await _initFuture;
     if (_disposed) return;
+    _requestedVisible = isVisible;
+    if (_renderWhenHidden && !isVisible) {
+      await WebviewWinFloatingPlatform.instance.updateBounds(
+        _webviewId, const Offset(-20000, -20000), const Size(1440, 900), 1,
+      );
+      await WebviewWinFloatingPlatform.instance.setVisibility(_webviewId, true);
+      return;
+    }
+    if (_renderWhenHidden && _hasLayoutBounds) {
+      await WebviewWinFloatingPlatform.instance.updateBounds(
+        _webviewId, _lastLayoutOffset, _lastLayoutSize, _lastDevicePixelRatio,
+      );
+    }
     await WebviewWinFloatingPlatform.instance.setVisibility(
       _webviewId,
       isVisible,

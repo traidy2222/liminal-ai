@@ -119,9 +119,9 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_PERSONA_INFER_MODEL: "",
   AGENT_PERSONA_GEN_TIMEOUT_MS: "90000",
   AGENT_PERSONA_GEN_RETRIES: "2",
-  AGENT_PERSONA_UI_THEME_LLM: "1",
-  AGENT_PERSONA_UI_COPY: "1",
-  AGENT_PERSONA_SOUL_MODE: "batch",
+  AGENT_PERSONA_UI_THEME_LLM: "0",
+  AGENT_PERSONA_UI_COPY: "0",
+  AGENT_PERSONA_SOUL_MODE: "scaffold",
   AGENT_PERSONA_REPAIR_MAX: "1",
   AGENT_PERSONA_GENERATION_STREAM: "1",
   AGENT_PERSONA_PREVIEW_MAX_CHARS: "16000",
@@ -167,12 +167,12 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_SELF_HEAL_REPO_WIDE: "0",
   AGENT_SELF_HEAL_STOP_ON_NO_PROGRESS: "1",
   AGENT_SELF_HEAL_LINT_MODE: "tsc",
-  /** After typed file edits, harness auto-runs run_lint and injects [VERIFY RESULT] before the next round. */
-  AGENT_PROACTIVE_VERIFY: "1",
-  AGENT_PROACTIVE_VERIFY_LINT: "1",
-  /** @deprecated Use AGENT_PROACTIVE_VERIFY — kept for prefs migration. */
-  AGENT_VERIFY_BEFORE_DONE: "1",
-  AGENT_VERIFY_BEFORE_DONE_AUTO_LINT: "1",
+  /** Optional in-flow checks; disabled by default to avoid unsolicited verification. */
+  AGENT_PROACTIVE_VERIFY: "0",
+  AGENT_PROACTIVE_VERIFY_LINT: "0",
+  /** Opt-in final verification/audit; normal completions are terminal. */
+  AGENT_VERIFY_BEFORE_DONE: "0",
+  AGENT_VERIFY_BEFORE_DONE_AUTO_LINT: "0",
   /** Fusion panel preset when AGENT_MODEL=openrouter/fusion: quality | budget | custom. */
   AGENT_OPENROUTER_FUSION_PRESET: "quality",
   /** Custom Fusion panel (comma-separated, 1–8 slugs) when preset=custom. */
@@ -400,7 +400,7 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   AGENT_COMPLEXITY_ROUTING: "1", // trivial non-creative turns → fast model (see intent_inference.ts)
   AGENT_EFFORT_LEARN: "1",               // record per-intent effort outcomes and reuse the best as fallback prior
   AGENT_OUTCOME_IMPLICIT_FEEDBACK: "1",  // defer learning to next user message; mine corrections/thanks as labels
-  AGENT_OUTCOME_JUDGE: "1",              // fast-model outcome judge on a sample of turns
+  AGENT_OUTCOME_JUDGE: "0",              // fast-model outcome judge on a sample of turns
   AGENT_OUTCOME_JUDGE_SAMPLE_RATE: "0.1", // fraction of deferred turns to judge (0–1)
   AGENT_EVAL_OUTCOME_LEARN: "1",         // feed eval-suite pass/fail into recipe_stats effort cells
   AGENT_REASONING_NUDGE_CHARS: "2500",   // legacy; stream stall enforcement removed
@@ -528,5 +528,5 @@ export const HARNESS_ENV_DEFAULTS: Readonly<Record<string, string>> = {
   // Comma-separated tools that skip destructive approval when safety judge is off
   AGENT_AUTO_APPROVE_TOOLS: "run_lint,run_tests,git_status",
   // User reply finalize — run a final pass when turn would end with tools/vault only
-  AGENT_USER_REPLY_FINALIZE: "0",
+  AGENT_USER_REPLY_FINALIZE: "1",
 };

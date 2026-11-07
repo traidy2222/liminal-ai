@@ -40,8 +40,8 @@ editing, navigating, and reasoning never wait on activation.
 | `web` | `web_search`, `web_fetch`, `http_request`, `weather_lookup` | — |
 | `markets` | `markets_quote` | `AGENT_MARKETS_ENABLE` |
 | `browser` | `browser_open/navigate/snapshot/act/extract/wait_for/cookies/close`, `browser_serve_file` | `AGENT_BROWSER` |
-| `captcha` | `captcha_solve` | `AGENT_CAPTCHA_KEY` |
-| `vision` | `vision_analyze`, `upload_image` | `AGENT_VISION_*` |
+| `captcha` | `captcha_inspect` (no paid task), `captcha_drag` (loose-piece drag), `captcha_solve` (token/image/points) | `AGENT_CAPTCHA_KEY` for paid solves |
+| `vision` | `upload_image` — native pixels in the selected chat model | `AGENT_NATIVE_VISION` |
 | `audio` | `speak` (TTS), `transcribe_audio` | `AGENT_TTS_ENABLED` / `AGENT_TRANSCRIBE_ENABLED` |
 | `memory_advanced` | `recall_relevant`, `memory_query`, `memory_graph`, `memory_consolidate`, `curate_memory`, `restore_memory`, `memory_promote`, `memory_neighbors`, `consolidate_chat`, `read_artifact`, `failure_review` | — |
 | `vault` | `vault_write/read/search/list/links/graph/delete` | — |

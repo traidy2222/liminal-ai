@@ -1493,12 +1493,9 @@ async function fetchWithRetry(
       const r = await fetch(url, { ...init, headers });
       const body = await r.json().catch(() => ({}));
       lastStatus = r.status;
-      // 409 = duplicate send while agent is already processing — first attempt got through
+      // Known request IDs receive 200; a genuine 409 was not accepted.
       if (r.status === 409) {
         const errMsg = String((body as { error?: string }).error ?? "");
-        if (/already processing/i.test(errMsg)) {
-          return { ok: true, status: 409, body };
-        }
         return { ok: false, status: 409, body };
       }
       // 4xx client error — don't retry
@@ -2647,6 +2644,7 @@ export function useSSE(options?: {
 
   const sendMessage = useCallback(async (payload: OutgoingChatMessage): Promise<SendMessageResult> => {
     const text = payload.text.trim();
+    const requestId=globalThis.crypto?.randomUUID?.()??`web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const attachmentCount = payload.attachments?.length ?? 0;
     const renderedUserMessage =
       attachmentCount > 0 ? `${text || "(no text)"}\n[attached images: ${attachmentCount}]` : text;
@@ -2671,6 +2669,7 @@ export function useSSE(options?: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          requestId,
           attachments: payload.attachments ?? [],
           liveDictation: Boolean(payload.liveDictation),
           ...(payload.workflowPreset ? { workflowPreset: payload.workflowPreset } : {}),
@@ -2747,13 +2746,13 @@ export function useSSE(options?: {
   }, []);
 
   const sendPersonaBootstrap = useCallback(
-    async (input: string, options?: { skip?: boolean }): Promise<SendMessageResult> => {
+    async (input: string, options?: { skip?: boolean; name?:string }): Promise<SendMessageResult> => {
       const result = await fetchWithRetry(
         `${SERVER}/api/persona/bootstrap`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input, skip: Boolean(options?.skip) }),
+          body: JSON.stringify({ input, skip: Boolean(options?.skip),name:options?.name }),
         },
         6
       );

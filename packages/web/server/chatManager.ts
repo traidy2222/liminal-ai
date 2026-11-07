@@ -152,6 +152,7 @@ export class ChatManager {
       if (prev) prev.bridge.suspendSSE();
     }
 
+    await this.reloadRuntimePrefs();
     let slot = this.bridges.get(chatId);
     if (!slot) {
       // Lazy construction — first activation builds the bridge for this chat.
@@ -164,7 +165,10 @@ export class ChatManager {
       );
       const bridge = new AgentBridge(
         this.sse,
-        { chatId, workspaceRoot: meta.workspaceRoot },
+        { chatId, workspaceRoot: meta.workspaceRoot, onPreferencesSaved: async prefs=>{
+          this.cachedRuntimePrefs=prefs;
+          for(const existing of this.bridges.values())await existing.bridge.synchronizePreferences(prefs);
+        } },
         this.cachedRuntimePrefs,
         provider
       );
@@ -177,6 +181,7 @@ export class ChatManager {
       });
     } else {
       slot.lastTouchedAt = Date.now();
+      if(this.cachedRuntimePrefs)await slot.bridge.synchronizePreferences(this.cachedRuntimePrefs);
     }
 
     this.activeChatId = chatId;

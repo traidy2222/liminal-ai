@@ -138,12 +138,12 @@ export const TOOL_FAMILIES: Record<string, { description: string; tools: readonl
     ],
   },
   captcha: {
-    description: "Solve CAPTCHAs (reCAPTCHA v2/v3, hCaptcha, Turnstile, image) via 2captcha or CapSolver. Auto-detects from browser session and injects token.",
-    tools: ["captcha_solve"],
+    description: "Observe canvas challenges, perform grounded loose-piece drags, or solve supported token/image CAPTCHAs via 2captcha or CapSolver.",
+    tools: ["captcha_solve","captcha_inspect","captcha_drag"],
   },
   vision: {
-    description: "Sidecar vision analysis (image understanding while Owl remains primary reasoning model).",
-    tools: ["vision_analyze", "upload_image"],
+    description: "Native image input to the active chat model. Browser screenshots attach automatically; upload_image loads local files without a separate model call.",
+    tools: ["upload_image"],
   },
   audio: {
     description:

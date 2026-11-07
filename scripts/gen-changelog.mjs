@@ -100,15 +100,9 @@ function buildDocsChangelog(data) {
   }
 
   lines.push(
-    "## Planned (not started)",
+    "## Next",
     "",
-    "See the full [Roadmap](./roadmap.md) for what each milestone means.",
-    "",
-    "| Stage | Target | Status |",
-    "|-------|--------|--------|",
-    "| Beta | Stability + defaults freeze candidate | Not started |",
-    "| RC | Ship checklist, docs freeze | Not started |",
-    "| v0.1.0 | Public preview tag + install GA | Not started |",
+    "Planned work and milestone definitions are tracked in the [Roadmap](./roadmap.md). Published desktop downloads and release availability are listed on [GitHub Releases](https://github.com/traidy2222/liminal-ai/releases).",
     "",
     "---",
     "",

@@ -5,6 +5,18 @@ import {ToolRegistry} from './registry.js';
 import {ToolDispatcher} from './dispatcher.js';
 import {AgentEmitter} from './events.js';
 
+test('correctable visual challenge failures do not disable CAPTCHA tools; service failures do',async()=>{
+ for(const error of ['VISIBLE_VISUAL_CHALLENGE: inspect the page','VISUAL_CHALLENGE_CHANGED: inspect again','INVALID_VISUAL_SOLUTION: source is not destination','Unknown visual ref. Use captcha_inspect','source_region must bound the loose piece. No paid task submitted.'])
+  assert.equal(isRecoverableToolFailure('captcha_drag',{ok:false,error}),true,error);
+ for(const error of ['2captcha HTTP 503','ERROR_ZERO_BALANCE','AGENT_CAPTCHA_KEY is not set','2captcha timed out after 120000ms','Target page, context or browser has been closed'])
+  assert.equal(isRecoverableToolFailure('captcha_drag',{ok:false,error}),false,error);
+ const registry=new ToolRegistry();let attempts=0;
+ registry.register({name:'captcha_drag',description:'fixture',parameters:{type:'object',properties:{}},requiresApproval:false,handler:async()=>{attempts++;return attempts<5?{ok:false,error:'INVALID_VISUAL_SOLUTION: source is not destination'}:{ok:true,output:'pending_submission'};}});
+ const dispatcher=new ToolDispatcher(registry,new AgentEmitter());
+ for(let i=0;i<4;i++)assert.equal((await dispatcher.dispatch('correctable-'+i,'captcha_drag','{}')).ok,false);
+ assert.equal((await dispatcher.dispatch('corrected','captcha_drag','{}')).ok,true);assert.equal(attempts,5);
+});
+
 test('procedure preflight rejection does not disable a healthy write tool', async () => {
  const registry = new ToolRegistry(); let calls = 0;
  registry.register({name:'write_file',description:'fixture',parameters:{type:'object',properties:{path:{type:'string'}}},requiresApproval:false,handler:async()=>{calls++;return {ok:true,output:'written'};}});
@@ -20,6 +32,10 @@ test('correctable browser actions do not trip the backend circuit; closed target
  for(const error of ['Unknown ref "e1"','browser_act step 2: locator.click: Timeout 500ms exceeded','wait_ms: ms is required'])
   assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error}),true);
  assert.equal(isRecoverableToolFailure('browser_act',{ok:false,error:'browser_act step 2: Target page, context or browser has been closed'}),false);
+ assert.equal(isRecoverableToolFailure('browser_wait_for',{ok:false,error:'Timeout waiting for URL to contain "dashboard" (current: https://example.test/onboard)'}),true);
+ assert.equal(isRecoverableToolFailure('browser_credentials',{ok:false,error:'ACCOUNT_EVIDENCE_REQUIRED: quote the current page'}),true);
+ assert.equal(isRecoverableToolFailure('browser_credentials',{ok:false,error:'Account evidence was not found on the current page.'}),true);
+ assert.equal(isRecoverableToolFailure('browser_credentials',{ok:false,error:'Saved login operation failed. Check the encrypted credential store.'}),false);
 });
 
 test("recoverable recall miss does not count as circuit failure", () => {

@@ -34,16 +34,18 @@ function messageText(m: Message): string {
  * Approximate token count for budgeting. Uses cl100k_base when js-tiktoken is installed.
  */
 export function estimateMessagesTokens(messages: Message[]): number {
+  // Image token accounting varies by model. Budget pixels rather than base64 text.
+  const imageTokens=messages.reduce((total,message)=>total+(Array.isArray(message.content)?message.content.filter(part=>part.type==='image_url').length*1600:0),0);
   const e = getEncoder();
   if (!e) {
     const chars = messages.reduce((s, m) => s + messageText(m).length, 0);
-    return Math.ceil(chars / 4);
+    return Math.ceil(chars / 4)+imageTokens;
   }
   let n = 0;
   for (const m of messages) {
     n += e.encode(messageText(m)).length + 4;
   }
-  return n;
+  return n+imageTokens;
 }
 
 function estimateStringTokens(text: string): number {

@@ -711,6 +711,10 @@ class DictationController extends ChangeNotifier {
 
   @override
   void dispose() {
+    // Async recorder teardown must not call back into a disposed app controller.
+    onCaptureActiveChange = null;
+    onSessionActiveChange = null;
+    onAutoSend = null;
     _disposed = true;
     _sessionGeneration++;
     _audioClient?.cancelTranscriptionRequests();

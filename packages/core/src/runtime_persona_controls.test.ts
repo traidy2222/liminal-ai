@@ -1,4 +1,5 @@
 import test from "node:test";
+import { AgentHarness } from "./agent.js";
 import assert from "node:assert/strict";
 import {
   applyPersonaControlsToProfile,
@@ -63,7 +64,7 @@ test("applyPersonaControlsToProfile updates style and tone deterministically", (
   assert.match(next.speechStyle.rhythm, /short|dense/i);
 });
 
-test("buildRuntimePersonaBlock includes effective controls when provided", () => {
+test("buildRuntimePersonaBlock preserves delivery and only describes requested controls", () => {
   const profile = sampleProfile();
   const block = buildRuntimePersonaBlock(profile, {
     humorPercent: 23,
@@ -72,8 +73,22 @@ test("buildRuntimePersonaBlock includes effective controls when provided", () =>
     verbosity: "compact",
     personaStrength: 6,
   });
-  assert.match(block, /Effective controls:/);
-  assert.match(block, /humorPercent=23/);
-  assert.match(block, /verbosity=compact/);
+  assert.match(block, /Plain technical diction/);
+  assert.match(block, /Response detail: compact/);
+  assert.doesNotMatch(block, /Rule:|YOU ALWAYS|YOU NEVER/);
 });
 
+
+
+test('preference saves and targeted controls retain the complete generated voice', async()=>{
+ const profile=sampleProfile();profile.speechStyle.rhythm='Distinctive rolling cadence';profile.tone.humorStyle='Quiet botanical puns';profile.generationSourceHint='Warm, patient, with long flowing sentences';
+ const harness=new AgentHarness({openRouterApiKey:'offline',model:'offline',baseURL:'http://127.0.0.1:1',worldContext:{disabled:true},proceduralMemory:{enabled:false},context:{inceptionMessages:[{role:'system',content:'Fixture'},{role:'system',content:'Protocol'}],modelMaxTokens:100000,thresholdFraction:0.9},runtimePreferences:{version:1,updatedAt:0}});
+ harness.setPersona({name:profile.name,description:profile.coreIdentity},buildRuntimePersonaBlock(profile),'Experience note: preserve continuity');
+ await harness.patchRuntimePreferences({persona:{activeProfile:profile,controls:{humorPercent:23}}},{persist:false});
+ const read=async()=>JSON.stringify(await harness.getContext().buildMessages());
+ assert.match(await read(),/Distinctive rolling cadence/);assert.match(await read(),/Quiet botanical puns/);
+ await harness.patchRuntimePreferences({harness:{env:{AGENT_TTS_ENABLED:'0'}}},{persist:false});
+ assert.match(await read(),/Distinctive rolling cadence/);assert.match(await read(),/Experience note: preserve continuity/);
+ await harness.patchRuntimePreferences({persona:{controls:{confidence:8}}},{persist:false});
+ assert.match(await read(),/Quiet botanical puns/);assert.equal(harness.getRuntimePreferences()?.persona?.activeProfile?.tone.confidence,8);
+});

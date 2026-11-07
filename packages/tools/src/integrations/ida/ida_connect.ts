@@ -148,7 +148,8 @@ async function resolveIdaMcpUrl(
 async function attachIdaAtUrl(
   registry: ToolRegistry,
   resolved: { url: string; sidecarManaged: boolean; viaGuiFallback?: boolean },
-  readOnly: boolean
+  readOnly: boolean,
+  autoActivate = true
 ): Promise<{ ok: true; output: string; toolCount: number }> {
   const auth: AuthScheme = { kind: "none" };
   const { record, registered } = await attachMcpConnection(registry, {
@@ -160,7 +161,7 @@ async function attachIdaAtUrl(
     providerId: "ida",
     services: [readOnly ? "read_only" : "read_write"],
     sidecarManaged: resolved.sidecarManaged,
-    autoActivate: true,
+    autoActivate,
   });
   resetIdaActiveDatabase();
   const viaNote = resolved.viaGuiFallback
@@ -180,7 +181,7 @@ async function attachIdaAtUrl(
 
 export async function connectIdaMcp(
   registry: ToolRegistry,
-  opts?: { readOnly?: boolean; mcpUrl?: string }
+  opts?: { readOnly?: boolean; mcpUrl?: string; autoActivate?: boolean }
 ): Promise<{ ok: true; output: string; toolCount: number } | { ok: false; error: string }> {
   if (!idaMcpEnabled()) {
     return {
@@ -196,7 +197,7 @@ export async function connectIdaMcp(
   }
 
   try {
-    return await attachIdaAtUrl(registry, resolved, opts?.readOnly === true);
+    return await attachIdaAtUrl(registry, resolved, opts?.readOnly === true, opts?.autoActivate !== false);
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
     const hasExplicitUrl =
@@ -211,7 +212,8 @@ export async function connectIdaMcp(
           return await attachIdaAtUrl(
             registry,
             { url: guiUrl, sidecarManaged: false, viaGuiFallback: true },
-            opts?.readOnly === true
+            opts?.readOnly === true,
+            opts?.autoActivate !== false
           );
         } catch (e2) {
           const raw2 = e2 instanceof Error ? e2.message : String(e2);

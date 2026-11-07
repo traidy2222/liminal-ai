@@ -47,3 +47,10 @@ test("ordinary browser work gets concise policy and relevant operational notes",
   assert.doesNotMatch(suffix, /REA:|Mail:|Research:|Outlook|AgentCard|YouTube|IDA/);
   assert.equal(buildInceptionMessages()[1]!.content, PROTOCOL_CORE);
 });
+
+test("requested assistant signup preserves its identity and relies on observed requirements", async () => {
+  const { PROTOCOL_CORE } = await import("./systemPrompt.js");
+  assert.match(PROTOCOL_CORE, /including an account for the assistant when requested/);
+  assert.match(PROTOCOL_CORE, /distinct from the user's personal information/);
+  assert.match(PROTOCOL_CORE, /instead of predicting provider restrictions/);
+});

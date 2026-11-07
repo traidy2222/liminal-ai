@@ -1,99 +1,32 @@
-/**
- * upload_image — inject an image into the conversation for visual analysis.
- *
- * Reads an image file from disk, base64-encodes it, and appends it as a
- * vision content block directly into the agent's context window so the model
- * can see it on the very next response.
- *
- * Supports JPEG, PNG, GIF, WebP. Max recommended size: ~4 MB.
- */
-import { readFile } from "node:fs/promises";
-import { resolve, extname } from "node:path";
-import type { AgentHarness } from "@liminal/core";
-import { defineTool } from "../../shared/helpers.js";
+import {readFile} from 'node:fs/promises';
+import {resolve,extname} from 'node:path';
+import {modelSupportsNativeVisionAsync,type AgentHarness,type ToolResult} from '@liminal/core';
+import {defineTool} from '../../shared/helpers.js';
 
-const MIME_MAP: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-};
+const mimeTypes:Record<string,string>={'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp'};
+const maxBytes=4*1024*1024;
 
-const MAX_BYTES = 4 * 1024 * 1024; // 4 MB
+/** Native tool pixels go to the next main-model request, after the entire tool batch. */
+export async function attachNativeImage(harness:AgentHarness,input:string,note:string,key='uploaded-image'):Promise<ToolResult>{
+ if(!await modelSupportsNativeVisionAsync(harness.config.model,harness.config.baseURL))return {ok:false,error:'IMAGE_INPUT_UNAVAILABLE: The selected chat model has no confirmed image input support. Choose an image-capable model or configure native image support for your local model. No secondary model was called.'};
+ let dataUrl:string,source:string;
+ if(input.startsWith('data:image/')){
+  const parsed=input.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if(!parsed||Buffer.byteLength(parsed[2]!,'base64')>maxBytes)return {ok:false,error:'Invalid or oversized image data; maximum 4 MB.'};
+  dataUrl=input;source='image payload';
+ }else{
+  const file=resolve(input),mime=mimeTypes[extname(file).toLowerCase()];
+  if(!mime)return {ok:false,error:'Supported image files: JPEG, PNG, GIF, WebP.'};
+  let bytes:Buffer;try{bytes=await readFile(file);}catch{return {ok:false,error:'Image file could not be read: '+file};}
+  if(!bytes.length||bytes.length>maxBytes)return {ok:false,error:'Image must contain data and be no larger than 4 MB.'};
+  dataUrl=`data:${mime};base64,${bytes.toString('base64')}`;source=file;
+ }
+ harness.getContext().setImageObservation(key,note||'Image from '+source,dataUrl);
+ return {ok:true,output:'NATIVE_IMAGE_ATTACHED: '+source+'. Pixels will be included in the next active chat-model request; no separate analysis call.'};
+}
 
-export function createUploadImageTool(harness: AgentHarness) {
-  return defineTool({
-    name: "upload_image",
-    description:
-      "WHAT: Load an image file from disk and inject it into the conversation so the model can see it.\n" +
-      "WHEN: The user provides a screenshot, diagram, mockup, chart, or any image to analyze.\n" +
-      "NOT WHEN: The image is already a URL — use web_fetch to download first if needed.\n" +
-      "ARGS: path — absolute or relative path to the image file (JPEG, PNG, GIF, or WebP); " +
-      "note — optional text note to include alongside the image (e.g. 'Please describe this UI mockup').",
-    requiresApproval: false,
-    parameters: {
-      type: "object",
-      properties: {
-        path: { type: "string", description: "Path to the image file" },
-        note: {
-          type: "string",
-          description: "Optional note or question to include with the image",
-        },
-      },
-      required: ["path"],
-      additionalProperties: false,
-    },
-    handler: async (args) => {
-      const filePath = resolve(args["path"] as string);
-      const note = (args["note"] as string | undefined) ?? "";
-
-      const ext = extname(filePath).toLowerCase();
-      const mimeType = MIME_MAP[ext];
-      if (!mimeType) {
-        return {
-          ok: false,
-          error: `Unsupported image format "${ext}". Supported: ${Object.keys(MIME_MAP).join(", ")}`,
-        };
-      }
-
-      let bytes: Buffer;
-      try {
-        bytes = await readFile(filePath);
-      } catch (err) {
-        return { ok: false, error: `Cannot read image file: ${String(err)}` };
-      }
-
-      if (bytes.length > MAX_BYTES) {
-        return {
-          ok: false,
-          error: `Image too large (${(bytes.length / 1024 / 1024).toFixed(1)} MB). Max: 4 MB.`,
-        };
-      }
-
-      const base64 = bytes.toString("base64");
-      const dataUrl = `data:${mimeType};base64,${base64}`;
-
-      // Inject into context as a user message with an image_url content block
-      // This is the OpenAI vision format, supported by most multimodal models
-      const textPart = note || "Image attached. Please analyze it.";
-      harness.getContext().append({
-        role: "user",
-        content: [
-          { type: "text", text: textPart },
-          { type: "image_url", image_url: { url: dataUrl } },
-        ] as unknown as string, // cast: OpenAI SDK types are strict but this is valid
-      });
-
-      const kb = Math.round(bytes.length / 1024);
-      return {
-        ok: true,
-        output:
-          `Image injected into context: ${filePath}\n` +
-          `Format: ${mimeType}  Size: ${kb} KB\n` +
-          `The model will see this image on the next response.\n` +
-          (note ? `Note: "${note}"` : ""),
-      };
-    },
-  });
+export function createUploadImageTool(harness:AgentHarness){
+ return defineTool({name:'upload_image',description:'Load a local image file or image data URL into the active chat model’s native visual context. No separate model or analysis request. Browser screenshots are attached automatically. Supports JPEG, PNG, GIF, WebP up to 4 MB.',requiresApproval:false,
+  parameters:{type:'object',properties:{path:{type:'string',description:'Image file path or data:image/...;base64 URL'},note:{type:'string',description:'Optional description of the image or question'}},required:['path'],additionalProperties:false},
+  handler:async args=>attachNativeImage(harness,String(args.path??''),String(args.note??''))});
 }

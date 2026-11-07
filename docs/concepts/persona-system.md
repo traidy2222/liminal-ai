@@ -85,20 +85,20 @@ Legacy `style_lexicon.json` files are still deleted on persona persist.
 ## Model pipeline (generation)
 
 1. **Profile pass** — User phrase + strength + modifier → JSON-moded completion → `PersonaProfile` (validated shape: identity, speech, tone, cognition, `neverDo` / `alwaysDo`, optional `generationSourceHint` for surface-fidelity to user wording).
-2. **Soul pass** — Default **`AGENT_PERSONA_SOUL_MODE=batch`**: one fast-model JSON call returns all four markdown slices (`identityMd`, `voiceMd`, `stanceMd`, `railsMd`). Alternatives: `parallel` (four concurrent slice calls) or `scaffold` (no LLM — `buildSoulSlicesFromProfile` only). Soul HTTP uses **`personaInferModel()`** (`AGENT_PERSONA_INFER_MODEL` → `AGENT_FAST_MODEL` → main model). Per-slice scaffolds fill gaps when a slice fails validation.
-3. **Persist** — Write profile, all soul slices, preserve or seed `living.md`, and manifest (`version: 2`); delete legacy `style_lexicon.json` if present; **apply** to harness so the next model round sees the new block.
-4. **UI theme** — Runs **in parallel** with soul generation. Default: **`AGENT_PERSONA_UI_THEME_LLM=0`** — `derivePersonaShellHeuristics` + `validateAndNormalizePersonaUiTheme` only (no LLM). Set `AGENT_PERSONA_UI_THEME_LLM=1` for a small JSON theme completion using a profile + scaffold excerpt. Written to `ui_theme.json` (`v: 2`, manifest `uiThemeVersion: 2`). Legacy `v: 1` themes migrate on read.
+2. **Reference artifacts** — Default `AGENT_PERSONA_SOUL_MODE=scaffold` renders identity, voice, stance and preferences directly from the profile, without another model call. `batch` and `parallel` remain explicit alternatives.
+3. **Controls** — Start at moderate intensity (5/10). Explicit controls change only their corresponding delivery fields; saving unrelated settings preserves the complete persona.
+4. **Optional appearance** — Theme and interface-label generation are off by default. Enable “Match interface theme and labels” during setup to generate them. Otherwise the existing design is retained.
 
-**Typical LLM budget (balanced default):** voice infer + profile draft + up to **`AGENT_PERSONA_REPAIR_MAX`** repair (default `1`) + one batched soul call ≈ **3–4** round-trips (down from ~8–11 serial calls).
+**Normal generation budget:** one profile request, plus at most one repair for missing required fields. There is no separate voice-classifier request or required quota of persona rules. New model connections receive one small tool-call verification first. A local receipt binds verification to the endpoint, model and a hash of the key; it stores no raw credentials and avoids repeated launch checks.
 
-Progress stages for UIs include `artifact_start` (soul + theme), `ui_theme_start` / `ui_theme_ready` (see `persona_bootstrap_ui_strings` in core).
+The same compact profile renderer is used after generation, on settings changes and after restart. Soul reference files are not repeated into the runtime prompt; bounded experience notes remain supplemental. Persona descriptions govern expression, while tool permissions and factual standards remain in the harness protocol.
 
 Timeouts and retries for persona HTTP calls: `AGENT_PERSONA_GEN_TIMEOUT_MS` (default 90s), `AGENT_PERSONA_GEN_RETRIES` (default 2). **`AGENT_PERSONA_INFER_MODEL`** overrides the fast sidecar slug for infer, soul batch, and optional theme LLM.
 
 | Env | Default | Effect |
 |-----|---------|--------|
-| `AGENT_PERSONA_SOUL_MODE` | `batch` | `batch` \| `parallel` \| `scaffold` |
-| `AGENT_PERSONA_UI_THEME_LLM` | `0` | `1` = LLM HUD theme; `0` = heuristics only |
+| `AGENT_PERSONA_SOUL_MODE` | `scaffold` | `batch` \| `parallel` \| `scaffold` |
+| `AGENT_PERSONA_UI_THEME_LLM` | `0` | `1` = LLM HUD theme; `0` = retain current design |
 | `AGENT_PERSONA_GENERATION_STREAM` | `1` | `0` = disable live bootstrap workbench (stage/message only) |
 | `AGENT_PERSONA_PREVIEW_MAX_CHARS` | `16000` | Per-artifact SSE preview cap during bootstrap |
 

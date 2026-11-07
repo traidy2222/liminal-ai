@@ -16,7 +16,7 @@ test("browser action schema catches missing fields and invalid variants before e
     parameters:{type:"object",properties:{actions:{type:"array",items:BROWSER_ACTION_SCHEMA}},required:["actions"]},
     handler:async()=>{calls++;return {ok:true,output:"done"};}});
   const dispatcher = new ToolDispatcher(registry,new AgentEmitter());
-  for (const action of [{value:100},{op:"wait_ms",value:100},{op:"fill_ref",ref:"e1"},{op:"oops"}]) {
+  for (const action of [{value:100},{op:"wait_ms",value:-1},{op:"fill_ref",ref:"e1"},{op:"oops"}]) {
     assert.equal((await dispatcher.dispatch("bad","action_fixture",JSON.stringify({actions:[action]}))).ok,false);
   }
   assert.equal(calls,0);

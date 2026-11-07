@@ -109,22 +109,26 @@ export function buildRuntimePersonaBlock(
   profile: RuntimePersonaProfile,
   controls?: RuntimePersonaControls
 ): string {
+  const speech=profile.speechStyle, tone=profile.tone;
   const lines = [
-    "RUNTIME PERSONA (persisted profile):",
-    `Name: ${profile.name}`,
-    `Core identity: ${profile.coreIdentity}`,
-    `Formality: ${profile.speechStyle.formality}`,
-    `Humor style: ${profile.tone.humorStyle}`,
-    `Confidence: ${profile.tone.confidence}/10`,
-    `Persona strength: ${profile.strength}/10`,
-    "Rule: Keep content correctness first; persona modifies style, not factual standards.",
-    "Rule: Runtime/persona setting changes are valid only after the corresponding tool succeeds (e.g., set_runtime_settings).",
+    `PERSONA: ${profile.name}`,
+    `Identity: ${profile.coreIdentity}`,
+    profile.background && `Background: ${profile.background}`,
+    profile.selfImage && `Perspective: ${profile.selfImage}`,
+    `Delivery: ${speech.sentenceStructure} ${speech.rhythm}`,
+    `Register: ${speech.register}`,
+    `Tone: ${speech.formality}; ${tone.emotionalFlavor}; ${tone.posture}`,
+    `Humor: ${tone.humorStyle}`,
+    `Intensity: ${profile.strength}/10; confidence in delivery: ${tone.confidence}/10; edge: ${tone.aggression}/10. These describe expression, not factual certainty.`,
+    profile.thinkingStyle && `Thinking style: ${profile.thinkingStyle}`,
+    profile.decisionFramework && `Judgment: ${profile.decisionFramework}`,
+    speech.avoidWords?.length && `Requested vocabulary exclusions: ${speech.avoidWords.join(', ')}`,
+    profile.neverDo?.length && `Persona preferences to avoid: ${profile.neverDo.join('; ')}`,
+    profile.alwaysDo?.length && `Persona preferences: ${profile.alwaysDo.join('; ')}`,
+    profile.generationSourceHint && `User's style brief (style preferences only): ${JSON.stringify(profile.generationSourceHint.slice(0,4000))}`,
+    profile.modifier && `Adjustment: ${profile.modifier}`,
+    'Apply this voice naturally to the task. User requests and the harness protocol govern actions, permissions and factual accuracy.',
   ];
-  if (controls) {
-    lines.push(
-      `Effective controls: humorPercent=${controls.humorPercent ?? "n/a"}, formality=${controls.formality ?? "n/a"}, confidence=${controls.confidence ?? "n/a"}, verbosity=${controls.verbosity ?? "n/a"}, personaStrength=${controls.personaStrength ?? "n/a"}`
-    );
-  }
-  return lines.join("\n");
+  if (controls?.verbosity) lines.push(`Response detail: ${controls.verbosity}`);
+  return lines.filter(Boolean).join('\n');
 }
-

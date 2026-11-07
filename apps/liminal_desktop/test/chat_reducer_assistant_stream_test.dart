@@ -6,6 +6,45 @@ import 'package:liminal_desktop/core/transcript_grouping.dart';
 import 'package:liminal_desktop/core/chat_visibility.dart';
 
 void main() {
+  test(
+    'background prompts appear before replies, including attachment-only prompts',
+    () {
+      var state = reduceChatEvent(ChatTranscriptState.initial, 'user_message', {
+        'text': 'Build the launch workspace',
+        'requestId': 'background-1',
+      });
+      state = reduceChatEvent(state, 'text', {
+        'channel': 'user',
+        'delta': 'Starting now.',
+      });
+      expect(state.messages[0], isA<UserMessage>());
+      expect(
+        (state.messages[0] as UserMessage).text,
+        'Build the launch workspace',
+      );
+      expect(state.messages[1], isA<AssistantMessage>());
+      expect(state.busy, isTrue);
+      state = reduceChatEvent(state, 'user_message', {
+        'text': '',
+        'attachmentPreviews': [
+          {'name': 'brief.txt'},
+        ],
+      });
+      expect(
+        state.messages
+            .whereType<UserMessage>()
+            .last
+            .attachmentPreviews
+            .single
+            .name,
+        'brief.txt',
+      );
+      expect(
+        identical(reduceChatEvent(state, 'user_message', {'text': ''}), state),
+        isTrue,
+      );
+    },
+  );
   test('whitespace separators do not create narration or split tool work', () {
     var state = applyUserMessage(ChatTranscriptState.initial, 'Plan the trip');
     state = reduceChatEvent(state, 'text', {

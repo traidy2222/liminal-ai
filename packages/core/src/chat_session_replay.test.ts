@@ -110,3 +110,11 @@ describe("conversationEntriesForHydration", () => {
     ]);
   });
 });
+
+
+it('does not replay late answer or background tools after a closed turn',()=>{
+ const raw=[{event:'send_start',turnIndex:1,userMessage:'First'},{event:'text_rollup',turnIndex:1,text:'Done.'},{event:'turn_end',turnIndex:1},
+  {event:'text_rollup',turnIndex:1,text:'Old reply repeated'},{event:'tool_start',turnIndex:1,callId:'late',name:'remember'},{event:'tool_result',turnIndex:1,callId:'late',name:'remember',ok:true,output:'background'},
+  {event:'send_start',turnIndex:2,userMessage:'Next'},{event:'text_rollup',turnIndex:2,text:'New answer.'},{event:'turn_end',turnIndex:2}].map(r=>JSON.stringify(r)).join('\n');
+ const entries=parseSessionJsonlForReplay(raw);assert.deepEqual(entries.map(e=>e.text),['First','Done.','Next','New answer.']);
+});
