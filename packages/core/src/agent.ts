@@ -7347,6 +7347,9 @@ export class AgentHarness {
           return;
         }
       }
+      }
+      // An explicitly requested tool is unfinished task scope, independent of
+      // optional post-completion report/cleanup reviews.
       const missingConnectors = missingArtifactConnectors(this.requestedArtifactConnectorsThisSend, this.toolsUsedThisTurn, this.registry);
       if (missingConnectors.length) {
         if (!this.artifactConnectorContinuationAttempted) {
@@ -7361,6 +7364,7 @@ export class AgentHarness {
         this.emitTurnEnd("error");
         return;
       }
+      if(finalReviewEnabled){
       if (artifactInvestigation && !this.artifactEvidenceReviewAttempted &&
         (artifactInvestigation.requiredReports.length || artifactInvestigation.pendingNativeCleanup().length)) {
         this.artifactEvidenceReviewAttempted = true;
